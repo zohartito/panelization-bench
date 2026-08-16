@@ -1,0 +1,35 @@
+{
+  "surface": "corrugated_hypar_saddle_canopy",
+  "definition": "z = h1*(x/a)*(y/b) + h2*sin(p*pi*x/a)*cos(q*pi*y/b)",
+  "units": "meters",
+  "params": {
+    "a": 20.0,
+    "b": 10.0,
+    "h1": 2.5,
+    "h2": 0.6,
+    "p": 3.0,
+    "q": 2.0
+  },
+  "footprint_m": {
+    "x": [
+      -20.0,
+      20.0
+    ],
+    "y": [
+      -10.0,
+      10.0
+    ]
+  },
+  "target_module_m": 1.5,
+  "panel_grid_hint": {
+    "nx": 27,
+    "ny": 13
+  },
+  "planarity_tolerance_mm": 5.0,
+  "reference_mesh": {
+    "file": "canopy_reference.obj",
+    "nx": 80,
+    "ny": 40,
+    "sha256": "ead5b0342f69eec6c62d95dcc70275c919f1972bddbe6aa7ea160cf527146e60"
+  }
+}

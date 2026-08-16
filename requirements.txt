@@ -1,0 +1,9 @@
+# Pinned so the benchmark cannot silently change its own results over time.
+# Principle (mirrors the per-run `stack` block, one level down): pin everything
+# you are NOT testing. A library bump must be a deliberate, visible change.
+numpy==2.0.2
+scipy==1.14.1
+pytest==9.0.2
+ezdxf==1.4.4              # control lane (headless DXF) + .dxf scoring
+rhino3dm==8.17.0         # .3dm scoring
+autocad-mcp-pro==1.5.1   # ezdxf-control MCP lane
