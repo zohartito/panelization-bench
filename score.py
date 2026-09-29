@@ -30,6 +30,12 @@ fabricable, yet we have not proven a quality+planar solution exists at 1.5 m on
 this surface, so gating on it would be unfair. Egregious collapse (a mesh that is
 mostly zero-area slivers) IS flagged, as it indicates a broken or gamed mesh.
 
+TOPOLOGY (vertex irregularity) is graded the same way. Discrete Gauss-Bonnet gives
+a provable lower bound, `par`, on how many irregular vertices ANY all-quad mesh of
+the domain must carry; the excess over par is irregularity the mesher chose, not
+irregularity the domain forced. On the rectangular canopy par = 0, so every
+irregular vertex of a remeshed submission is recorded as topological cost.
+
 Units: stated explicitly (--units), or --units auto (guesses from the bounding box
 and warns). A scorer that silently compares mm to m is worthless. All distances
 reported in mm; the assumed unit and bounding box are always echoed.
@@ -43,6 +49,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
@@ -260,6 +267,110 @@ def edge_lengths(corners: np.ndarray) -> list[float]:
             for k in range(len(corners))]
 
 
+def corner_wants(angle_deg: float, target_deg: float = 90.0,
+                 tie_tol: float = 1e-6) -> tuple[int, ...]:
+    """Degrees a boundary vertex with this material-side angle is content with:
+    round(angle/90)+1, at least 2. At an exact rounding tie (135 deg -> 1.5) both
+    treatments are legal, so the vertex carries the set {floor+1, ceil+1} and is
+    scored against the nearer one."""
+    ratio = angle_deg / target_deg
+    if abs(ratio - np.floor(ratio) - 0.5) <= tie_tol:
+        low = max(int(np.floor(ratio)) + 1, 2)
+        high = max(int(np.ceil(ratio)) + 1, 2)
+        if low != high:
+            return (low, high)
+    return (max(int(np.round(ratio)) + 1, 2),)
+
+
+def _mesh_graph(V: np.ndarray, faces: list[list[int]], weld_tol_m: float = 1e-6):
+    """Welded connectivity: corner count, edge uses, material-side angle sum and
+    position per vertex, plus the face count. Summing incident panel corner
+    angles gives the material-side angle, so a hole corner reads 360 minus its
+    own angle for free."""
+    # weld coincident vertices: the DXF/3DM lanes emit one vertex copy per panel
+    _, weld = np.unique(np.round(V / weld_tol_m).astype(np.int64), axis=0,
+                        return_inverse=True)
+    weld = weld.ravel()
+    corners: dict[int, int] = defaultdict(int)
+    edge_uses: dict[tuple[int, int], int] = defaultdict(int)
+    angle: dict[int, float] = defaultdict(float)
+    pos: dict[int, np.ndarray] = {}
+    n_faces = 0
+    for raw in faces:
+        # a zero-width sliver welds shut; it is already counted as degenerate
+        face = [i for k, i in enumerate(raw) if weld[i] != weld[raw[k - 1]]]
+        n = len(face)
+        if len({int(weld[i]) for i in face}) < 3:
+            continue
+        n_faces += 1
+        for k in range(n):
+            a, b = int(weld[face[k]]), int(weld[face[(k + 1) % n]])
+            corners[a] += 1
+            edge_uses[(min(a, b), max(a, b))] += 1
+            pos[a] = V[face[k]]
+            u = V[face[k - 1]] - V[face[k]]
+            w = V[face[(k + 1) % n]] - V[face[k]]
+            nu, nw = np.linalg.norm(u), np.linalg.norm(w)
+            if nu > 1e-12 and nw > 1e-12:
+                angle[a] += float(np.degrees(np.arccos(np.clip(u @ w / (nu * nw),
+                                                               -1, 1))))
+    boundary = {v for e, uses in edge_uses.items() if uses == 1 for v in e}
+    return corners, edge_uses, angle, pos, boundary, n_faces
+
+
+def domain_corners(V: np.ndarray, faces: list[list[int]]) -> list[tuple]:
+    """(point, wanted degrees) for every corner of a domain mesh -- its boundary
+    vertices that do not want the straight-edge degree 3. Any triangulation of
+    the domain gives the same corners, so the reference mesh serves."""
+    _, _, angle, pos, boundary, _ = _mesh_graph(V, faces)
+    return [(pos[v], corner_wants(angle[v])) for v in boundary
+            if corner_wants(angle[v]) != (3,)]
+
+
+def topology_score(V: np.ndarray, faces: list[list[int]],
+                   domain: list[tuple] | None = None) -> dict:
+    """Vertex irregularity against par, its discrete Gauss-Bonnet lower bound.
+
+    Interior vertices want degree 4, boundary vertices 3, and each domain corner
+    corner_wants() of its angle. Par is a property of the DOMAIN, so with a
+    reference each domain corner is assigned to the nearest boundary vertex of
+    the submission -- a mesh cannot lower its own bound by distorting its
+    boundary. Without one, the submission's own boundary angles stand in. (On a
+    non-covering mesh two domain corners can land on one vertex; coverage
+    already fails such a mesh.)
+    Degree counts incident EDGES, +1 on the boundary -- not distinct
+    neighbours, which undercounts on non-simple meshes. For any all-quad mesh
+    sum(desired - degree) is the invariant corner_excess + 4*chi, so the L1
+    vertex score can never go below
+    par = min over tie choices t of |corner_excess + 4*chi + t|.
+    Ported from arjunnarayanan/par-quad (compute_par, compare_gmsh.score_mesh)."""
+    corners, edge_uses, angle, pos, boundary, n_faces = _mesh_graph(V, faces)
+    wants = {v: (3,) if v in boundary else (4,) for v in corners}
+    if domain is None:
+        wants.update({v: corner_wants(angle[v]) for v in boundary})
+    elif boundary:
+        ring = sorted(boundary)
+        ring_pos = np.array([pos[v] for v in ring])
+        for point, options in domain:
+            wants[ring[int(np.linalg.norm(ring_pos - point, axis=1).argmin())]] = options
+    defect = {v: min(abs(corners[v] + (v in boundary) - w) for w in wants[v])
+              for v in corners}
+    corner_excess = sum(min(wants[v]) - 3 for v in boundary)
+    n_ties = sum(len(wants[v]) - 1 for v in boundary)
+    chi = len(corners) - len(edge_uses) + n_faces
+    par = min(abs(corner_excess + 4 * chi + t) for t in range(n_ties + 1))
+    vertex_score = sum(defect.values())
+    return {
+        "par": par,
+        "par_source": "own_boundary" if domain is None else "reference",
+        "vertex_score": vertex_score,
+        "excess": vertex_score - par,
+        "irregular_vertices": sum(1 for d in defect.values() if d),
+        "euler_characteristic": chi,
+        "note": "graded axis, not a gate; par is a strict bound only for all-quad meshes",
+    }
+
+
 def _closest_on_triangles(p: np.ndarray, a: np.ndarray, b: np.ndarray,
                           c: np.ndarray) -> np.ndarray:
     """Vectorized closest point of p on each triangle (a,b,c: (T,3)).
@@ -397,7 +508,7 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
     bbox_min, bbox_max = V.min(0), V.max(0)
 
     # --- off-surface (analytic height field if available; exact, no noise) ---
-    off_surface = coverage = None
+    off_surface = coverage = domain = None
     if surface_z is not None:
         off_surface = off_surface_analytic(V, surface_z)
     # --- coverage needs the reference mesh; also fallback off-surface ---
@@ -407,6 +518,7 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
         ref_tris = np.concatenate(
             [triangulate(f, RV) for f in reference.faces if len(f) >= 3]
         )
+        domain = domain_corners(RV, reference.faces)
         ref_area = float(sum(0.5 * np.linalg.norm(np.cross(t[1] - t[0], t[2] - t[0]))
                              for t in ref_tris))
         if off_surface is None:  # no analytic surface -> mesh distance (noisy)
@@ -459,6 +571,7 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
             "degenerate_panels": n_degen,
             "note": "recorded, graded axis -- not a hard gate (see score.py header)",
         },
+        "topology": topology_score(V, mesh.faces, domain),
         "off_surface_mm": off_surface,
         "coverage": coverage,
         "bbox_m": {"min": bbox_min.tolist(), "max": bbox_max.tolist(),
@@ -619,6 +732,9 @@ def human_summary(r: dict) -> str:
                f"median {q['min_angle_deg_median']:.1f} | aspect median "
                f"{q['aspect_median']:.2f} worst {q['aspect_worst']:.1f} | "
                f"degenerate {q['degenerate_panels']}")
+    t = r["topology"]
+    out.append(f"  topology: {t['irregular_vertices']} irregular vertices | vertex "
+               f"score {t['vertex_score']} vs par {t['par']} -> excess {t['excess']}")
     if "trilemma_corner" in r:
         out.append(f"  trilemma corner: {r['trilemma_corner']}")
     for w in r.get("warnings", []):
