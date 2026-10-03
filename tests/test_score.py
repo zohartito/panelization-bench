@@ -202,6 +202,79 @@ def test_sliver_gaming_is_not_a_clean_pass():
 
 
 # --------------------------------------------------------------------------- #
+# Topology -- vertex irregularity against its Gauss-Bonnet lower bound (par).
+# --------------------------------------------------------------------------- #
+def _grid(n=3, size=3.0):
+    verts = [(size * i / n, size * j / n, 0.0) for j in range(n + 1)
+             for i in range(n + 1)]
+    vid = lambda i, j: j * (n + 1) + i
+    faces = [[vid(i, j), vid(i + 1, j), vid(i + 1, j + 1), vid(i, j + 1)]
+             for j in range(n) for i in range(n)]
+    return verts, faces
+
+
+def test_regular_grid_is_at_par_zero():
+    r = score.score_mesh(mesh(*_grid()), units="m")
+    assert r["topology"]["par"] == 0
+    assert r["topology"]["vertex_score"] == 0
+    assert r["topology"]["excess"] == 0
+
+
+def test_remeshed_square_pays_topological_cost():
+    # quad-in-quad: same square, 5 planar quads. par is still 0 (rectangle), but
+    # the 4 inner vertices have degree 3 and the 4 corners degree 3 (want 2).
+    v = [[0, 0, 0], [3, 0, 0], [3, 3, 0], [0, 3, 0],
+         [1, 1, 0], [2, 1, 0], [2, 2, 0], [1, 2, 0]]
+    f = [[4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]]
+    r = score.score_mesh(mesh(v, f), units="m")
+    t = r["topology"]
+    assert (t["par"], t["vertex_score"], t["excess"]) == (0, 8, 8)
+    assert t["irregular_vertices"] == 8
+    assert "excess 8" in score.human_summary(r)
+
+
+def test_forced_irregularity_is_par_not_excess():
+    # triangle split into 3 quads: the degree-3 centre is forced by the 60 deg
+    # corners, so par = 1 and the mesh is optimal (excess 0).
+    s = np.sqrt(3)
+    v = [[0, 0, 0], [2, 0, 0], [1, s, 0],             # corners
+         [1, 0, 0], [1.5, s / 2, 0], [0.5, s / 2, 0],  # edge midpoints
+         [1, s / 3, 0]]                                # centroid
+    f = [[0, 3, 6, 5], [3, 1, 4, 6], [6, 4, 2, 5]]
+    t = score.score_mesh(mesh(v, f), units="m")["topology"]
+    assert (t["par"], t["vertex_score"], t["excess"]) == (1, 1, 0)
+
+
+def test_topology_welds_per_panel_vertices():
+    # DXF 3DFACE export: every panel carries its own vertex copies
+    verts, faces = _grid()
+    split_v = [verts[i] for f in faces for i in f]
+    split_f = [[4 * k + c for c in range(4)] for k in range(len(faces))]
+    t = score.score_mesh(mesh(split_v, split_f), units="m")["topology"]
+    assert (t["par"], t["excess"], t["euler_characteristic"]) == (0, 0, 1)
+
+
+def test_par_comes_from_the_domain_not_the_submission():
+    # the gold conjugate net's boundary is folded (295/333 deg "corners"), so its
+    # own angles would lower its bound to par 2. Against the 40x20 rectangular
+    # canopy reference the domain has exactly 4 right-angle corners: par = 0.
+    root = Path(__file__).resolve().parents[1] / "reference"
+    ref = score.load_mesh(root / "canopy_reference.obj")
+    gold = score.load_mesh(root / "canopy_gold_planar.obj")
+    assert [w for _, w in score.domain_corners(ref.vertices, ref.faces)] == [(2,)] * 4
+    assert score.topology_score(gold.vertices, gold.faces)["par"] == 2
+    t = score.score_mesh(gold, units="m", reference=ref)["topology"]
+    assert (t["par"], t["par_source"]) == (0, "reference")
+    assert t["excess"] == t["vertex_score"] > 0
+
+
+def test_corner_wants_tie_is_a_set():
+    assert score.corner_wants(90.0) == (2,)
+    assert score.corner_wants(180.0) == (3,)
+    assert score.corner_wants(135.0) == (2, 3)
+
+
+# --------------------------------------------------------------------------- #
 # Parser round-trips (OBJ + DXF control lane).
 # --------------------------------------------------------------------------- #
 def test_analytic_off_surface_is_exact():
