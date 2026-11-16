@@ -260,3 +260,21 @@ def test_pzb16_generator_reports_saved_precision(tmp_path, monkeypatch, capsys):
     assert reported == pytest.approx(saved, rel=0.001)
     assert "full coverage" not in paths[0].read_text().splitlines()[0].lower()
     assert "INCOMPLETE_COVERAGE" in output
+
+
+def test_pzb29_rhino_client_is_pinned_and_locked():
+    doc = (ROOT / "pc/PC-ENGINES.md").read_text()
+    assert not re.search(r"uvx rhinomcp(?!@0\.3\.2)", doc), "Unpinned runtime client"
+    lock = ROOT / "pc/requirements-rhinomcp-macos-arm64-py311.lock"
+    assert lock.exists(), "Rhino client needs an integrity-checked dependency closure"
+    assert re.search(r"^rhinomcp==0\.3\.2 --hash=sha256:[0-9a-f]{64}$", lock.read_text(), re.M)
+    assert "--require-hashes" in doc
+
+
+def test_pzb32_remote_examples_use_placeholders():
+    doc = (ROOT / "pc/PC-ENGINES.md").read_text()
+    hosts = re.findall(r"^ssh -N -L \S+ (\S+)", doc, re.M)
+    generic_hosts = bool(hosts) and all(h == "windows-host.example" for h in hosts)
+    assert generic_hosts, "Tunnel examples must use a generic hostname"
+    assert "Hostnames and account names below are placeholders" in doc
+    assert "there is one:" not in doc
