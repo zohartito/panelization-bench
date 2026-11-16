@@ -153,3 +153,20 @@ def test_pzbn1_excess_coverage_fails(shift):
     assert r["coverage"]["area_ratio"] == pytest.approx(2.0)
     assert not r["checks"]["coverage"]["pass"]
     assert r["trilemma_corner"] != "ALL_THREE"
+
+
+@pytest.mark.parametrize("properties, rows", [
+    (["uchar red", "float x", "float y", "float z"],
+     ["255 0 0 5", "255 1 0 6", "255 1 1 7", "255 0 1 8"]),
+    (["float z", "float x", "float confidence", "float y"],
+     ["5 0 0.5 0", "6 1 0.5 0", "7 1 0.5 1", "8 0 0.5 1"]),
+])
+def test_pzb04_ply_named_coordinates(tmp_path, properties, rows):
+    path = tmp_path / "ordered.ply"
+    header = ["ply", "format ascii 1.0", "element vertex 4"]
+    header += ["property " + p for p in properties]
+    header += ["element face 1", "property list uchar int vertex_indices", "end_header"]
+    path.write_text("\n".join(header + rows + ["4 0 1 2 3"]))
+    mesh = score.load_mesh(path)
+    np.testing.assert_array_equal(mesh.vertices, [[0, 0, 5], [1, 0, 6], [1, 1, 7], [0, 1, 8]])
+    assert mesh.faces == [[0, 1, 2, 3]]

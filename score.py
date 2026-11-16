@@ -123,21 +123,38 @@ def _load_ply(path: Path) -> Mesh:
         raise ValueError("not an ASCII PLY file")
     n_vert = n_face = header_end = 0
     fmt = ""
+    element = None
+    vertex_properties = []
     for i, ln in enumerate(lines):
         t = ln.split()
         if t and t[0] == "format":
             fmt = t[1]
-        elif len(t) >= 3 and t[:2] == ["element", "vertex"]:
-            n_vert = int(t[2])
-        elif len(t) >= 3 and t[:2] == ["element", "face"]:
-            n_face = int(t[2])
+        elif len(t) >= 3 and t[0] == "element":
+            element = t[1]
+            if element == "vertex":
+                n_vert = int(t[2])
+            elif element == "face":
+                n_face = int(t[2])
+        elif t and t[0] == "property" and element == "vertex":
+            vertex_properties.append((t[-1], t[1] == "list"))
         elif t and t[0] == "end_header":
             header_end = i + 1
             break
     if fmt != "ascii":
         raise ValueError(f"only ASCII PLY supported (got {fmt})")
     body = lines[header_end:]
-    verts = [tuple(map(float, body[i].split()[:3])) for i in range(n_vert)]
+    if not {"x", "y", "z"} <= {name for name, is_list in vertex_properties if not is_list}:
+        raise ValueError("PLY vertices require scalar x, y and z properties")
+    verts = []
+    for row in body[:n_vert]:
+        fields, values, offset = row.split(), {}, 0
+        for name, is_list in vertex_properties:
+            if is_list:
+                offset += 1 + int(fields[offset])
+            else:
+                values[name] = float(fields[offset])
+                offset += 1
+        verts.append(tuple(values[name] for name in ("x", "y", "z")))
     faces = []
     for i in range(n_vert, n_vert + n_face):
         t = list(map(int, body[i].split()))
