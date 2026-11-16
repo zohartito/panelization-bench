@@ -94,6 +94,23 @@ def test_pzb02_seams_holes_and_boundary():
     assert r["verdict"] == "INVALID_CONNECTIVITY"
 
 
+@pytest.mark.parametrize("moved_reference", [False, True])
+@pytest.mark.parametrize("offset, verdict", [(0.25, "PASS"), (0.4, "INVALID_CONNECTIVITY")])
+def test_pzb02_boundary_corner_second_endpoint(moved_reference, offset, verdict):
+    ref = flat_grid()
+    vertices = ref.vertices.copy()
+    # The top-right corner is the second endpoint of both sorted boundary edges.
+    vertices[-1, 0] += offset
+    mesh = score.Mesh(vertices, ref.faces)
+    if moved_reference:
+        mesh, ref = ref, mesh
+    r = score.score_mesh(mesh, reference=ref, surface_z=lambda x, y: 0)
+    assert all(check["pass"] for name, check in r["checks"].items()
+               if name != "connectivity")
+    assert r["connectivity"]["boundary_gap_m"] == pytest.approx(offset)
+    assert r["verdict"] == verdict
+
+
 import json
 import runner
 

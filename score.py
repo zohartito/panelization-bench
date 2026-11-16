@@ -428,7 +428,7 @@ def connectivity_check(V, faces, RV, ref_faces, boundary_tol_m):
     def distance(source, target):
         if not len(source) or not len(target):
             return float("inf")
-        points = np.concatenate([source[:, 0], source.mean(axis=1)])
+        points = np.concatenate([source[:, 0], source[:, 1], source.mean(axis=1)])
         a, b = target[:, 0], target[:, 1]
         ab = b - a
         denominator = np.maximum((ab * ab).sum(1), 1e-30)
