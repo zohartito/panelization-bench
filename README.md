@@ -60,58 +60,35 @@ survive a pathological point," not "can you panelize." Surface A's only degenera
 its **parabolic K = 0 lines, where the surface is locally developable (a cylinder) —
 benign for panelization**, not an umbilic.
 
-## The trilemma (the load-bearing finding)
+## Reference examples and their limits
 
-A panelization must satisfy planarity, quality and coverage together. The examples
-below illustrate tradeoffs; they do not prove an optimizer is necessary or sufficient.
-Measured corners (all reproducible from `reference/build_reference_solution.py` and the
-probes):
+The shipped examples illustrate planarity, quality and coverage tradeoffs. They do
+not establish a feasibility bound for the whole canopy at a 1.5 m module.
+`reference/build_reference_solution.py` rebuilds the two reference nets; the
+harness selftest rebuilds the naive grid. Measurements below are on saved OBJ
+coordinates, using the scorer's SVD metric:
 
-| corner | method | planarity | quality (min interior angle) | coverage |
-|---|---|---|---|---|
-| **QUALITY + CONFORMING** (not planar) | naive UV grid | max 103 mm | median 88°, 0 slivers | full 40×20 |
-| **QUALITY + CONFORMING** (not planar) | damped guided-projection | ~50 mm floor | median 90°, 0 slivers | full 40×20 |
-| **PLANAR + QUALITY** (non-conforming) | principal curvature-line net | ~2e‑12 mm | **median 87°, 0 slivers** | only **2×2 m** of 40×20 |
-| PLANAR only (degenerate) | arbitrary conjugate net | ~5e‑12 mm | median 1.3°, worst 0° | **collapses** — area ratio 0.09, 20 m gaps |
+| example | max planarity | quality | coverage and module |
+|---|---|---|---|
+| naive 27×13 UV grid | 103 mm | median min angle 88°, 0 slivers | whole canopy, ~1.5 m |
+| principal curvature-line patch | 0.000445 mm | median min angle 87°, 0 slivers | 1.78×1.92 m patch, **0.078 m median edge** |
+| arbitrary conjugate net | 0.000505 mm | median min angle 1.3°, 310/351 slivers | area ratio 0.086; fails coverage |
 
-Reading of the table:
+The small principal patch demonstrates planar quads with good angles at an 8 cm
+module, far below the permitted module band. It is not evidence that the same
+quality is achievable at 1.5 m across the full canopy. The collapsed conjugate
+net demonstrates why planarity alone is insufficient.
 
-- **Planar quads of buildable quality genuinely exist on this surface** — the principal
-  curvature-line net proves it (machine-zero planarity, 87° median angle, zero slivers).
-  So the failure mode we feared most — "5 mm only reachable via unbuildable slivers" —
-  is **refuted**. Principal directions are simultaneously conjugate (⇒ planar) and
-  orthogonal (⇒ quality).
-- But principal curvature lines **do not conform to the rectangular boundary** (they
-  curl/overshoot), so that mesh covers only a small patch — the classic architectural-
-  geometry obstruction.
-- An arbitrary conjugate net *is* planar over vertices spanning the footprint, but on
-  this surface it **collapses/bunches** (fails coverage), so "planar" alone is trivially
-  reachable and worthless.
-- Getting all three at the requested module and boundary remains a target for
-  comparison, not a conclusion established by these examples.
+**Reference artifacts** in `reference/` are examples, never scoring targets:
+`canopy_gold_principal_patch.obj` is the small patch and `canopy_gold_planar.obj`
+is the collapsed net. Scoring never rewards similarity to them.
 
-**Reference artifacts** (in `reference/`, NEITHER is a scoring target — scoring never
-rewards similarity to them):
-
-- `canopy_gold_principal_patch.obj` — the planar + quality existence proof (a 2×2 m
-  patch: planarity ~2e‑12 mm, min-angle median 87°, 0 slivers).
-- `canopy_gold_planar.obj` — the conjugate net: planar to machine epsilon over the
-  footprint but **intentionally NOT fabricable** — median min interior angle **1.3°**,
-  worst **0°**, 310/351 slivers, and it fails coverage. Kept to show that planarity
-  alone is trivially gameable and meaningless without quality + coverage.
-
-The sliveryness was verified as **intrinsic**, not a bad draw: it reproduces across **4
-seedings** and **6 corrugation settings** (down to a single wave). Four different
-fixed-grid planarizers (free least-squares, normal-offset, projection-averaging,
-damped local/global with fairness) were also tried and all either stalled at ~30–50 mm
-or folded the mesh metres off-surface — a documented negative result, and the reason a
-conjugate/principal construction (not grid planarization) is the right approach.
-
-**Tolerance stays at 5 mm.** With the achievable ceiling at ~0 mm and naive grids at
-~100 mm, the result is near-bimodal (found the conjugate structure, or didn't) and the
-threshold barely matters; 5 mm is legible to an architect. Gradation comes from the
-other axes — module, coverage, off-surface, quality, friction, self-check — not the
-planarity threshold.
+Earlier exploratory notes reported guided projection, four fixed-grid planarizers,
+and seeding/corrugation sweeps. Their scripts, parameters and results are not
+included here, so those observations are not reproducible evidence for solver
+limits or near-bimodal behavior. No such general conclusion follows from the
+shipped examples. **Tolerance stays at 5 mm** as the task specification, not as
+an experimentally established discontinuity.
 
 ## Scoring — `score.py` (the neutral judge)
 
@@ -143,8 +120,7 @@ characteristic, never from the submission's component count.
 Every face must be a quad: any triangles trigger `DODGE_TRIANGULATED`; other
 non-quad panels trigger `NON_QUAD_PANELS`. Mixed-face meshes cannot pass.
 **Quality** (min interior angle, aspect ratio, degenerate-panel count) is measured and
-recorded but is a **graded axis, not a hard gate** — a quality+planar solution exists
-but is hard, so gating on it would be unfair; egregious collapse still trips
+recorded but is a **graded axis, not a hard gate** — full-task feasibility at buildable quality is not established; egregious collapse still trips
 `DEGENERATE_PANELS`. Every run is classified by which trilemma corner it landed on
 (`trilemma_corner`), so a sophisticated 2×2 m principal patch is distinguishable from
 an agent that panelized a random tenth of the surface and quit.
@@ -260,7 +236,7 @@ including the cost.
 1. **`PLANAR+CONFORMING` is reachable on this surface after all.** The reference build
    had concluded otherwise, because the arbitrary Cauchy-seeded conjugate net *collapses*
    here (area ratio 0.09). A barrier-constrained optimizer gets there while covering the
-   footprint — at the cost of quality. The trilemma stands; that corner is now occupied.
+   footprint — at the cost of quality. This is one reported outcome, not proof of a general trilemma.
 
 2. **The scorer had a hole, now fixed.** Quality was measured but never reached the
    verdict, so this mesh initially scored a clean `PASS` — a facade with a 3.6-trillion-to-one
