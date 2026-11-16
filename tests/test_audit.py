@@ -214,3 +214,34 @@ def test_pzb13_smoke_uses_requested_output(tmp_path, monkeypatch, capsys):
     runpy.run_path(str(script), run_name="__main__")
     assert len(ezdxf.readfile(out).modelspace().query("3DFACE")) == 28
     assert "HEADLESS_EZDXF_OK" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+def test_pzb14_report_refuses_existing_destination(tmp_path, symlink):
+    mesh = tmp_path / "quad.obj"
+    mesh.write_text("v 0 0 0\nv 1.5 0 0\nv 1.5 1.5 0\nv 0 1.5 0\nf 1 2 3 4\n")
+    victim, report = tmp_path / "victim.txt", tmp_path / "report.json"
+    victim.write_text("ORIGINAL")
+    if symlink:
+        report.symlink_to(victim)
+    else:
+        report.write_text("EXISTING")
+    with pytest.raises(SystemExit) as exc:
+        score.main([str(mesh), "--units", "m", "--json", str(report)])
+    assert exc.value.code == 2
+    assert victim.read_text() == "ORIGINAL"
+    assert report.is_symlink() if symlink else report.read_text() == "EXISTING"
+
+
+def test_pzb14_report_explicit_replacement(tmp_path):
+    path = tmp_path / "report.json"
+    score.write_json_report(path, {"first": True})
+    score.write_json_report(path, {"second": True}, overwrite=True)
+    assert json.loads(path.read_text()) == {"second": True}
+    victim = tmp_path / "victim.txt"
+    victim.write_text("ORIGINAL")
+    link = tmp_path / "link.json"
+    link.symlink_to(victim)
+    with pytest.raises(FileExistsError):
+        score.write_json_report(link, {}, overwrite=True)
+    assert victim.read_text() == "ORIGINAL"

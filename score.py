@@ -48,6 +48,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
@@ -842,6 +844,27 @@ def load_surface_z(path: Path):
     return lambda x, y: mod.z_of(x, y, prm)
 
 
+def write_json_report(path: Path, result: dict, overwrite: bool = False) -> None:
+    """Publish a complete report atomically, never following the output symlink."""
+    if path.is_symlink():
+        raise FileExistsError("refusing a symlink report destination")
+    fd, temporary = tempfile.mkstemp(prefix=".panelization-report-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(json.dumps(result, indent=2))
+            stream.flush()
+            os.fsync(stream.fileno())
+        if overwrite:
+            # Replaces the directory entry, never opens/follows its target.
+            os.replace(temporary, path)
+        else:
+            # Atomic no-clobber publication, including symlinks created in a race.
+            os.link(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Neutral planar-quad geometry scorer.")
     ap.add_argument("mesh", type=Path)
@@ -852,6 +875,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--surface-def", type=Path, default=None,
                     help="surface_def.py for EXACT analytic off-surface distance")
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--overwrite-json", action="store_true",
+                    help="explicitly replace an existing regular JSON report")
     args = ap.parse_args(argv)
 
     thr = Thresholds(tol_mm=args.tol_mm)
@@ -860,7 +885,10 @@ def main(argv: list[str] | None = None) -> int:
     surface_z = load_surface_z(args.surface_def) if args.surface_def else None
     result = score_mesh(mesh, args.units, reference, args.ref_units, thr, surface_z)
     if args.json:
-        args.json.write_text(json.dumps(result, indent=2))
+        try:
+            write_json_report(args.json, result, overwrite=args.overwrite_json)
+        except OSError as exc:
+            ap.error(f"cannot write JSON report: {exc}; use --overwrite-json to replace a regular file")
     print(human_summary(result))
     return 0
 

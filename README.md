@@ -207,6 +207,10 @@ python3 score.py <mesh.obj|.ply|.dxf|.3dm> \
     --surface-def reference/surface_def.py --units m
 ```
 
+Scorer `--json` output is atomic and refuses an existing destination by default.
+Use `--overwrite-json` to explicitly replace a regular report; symlink destinations
+are refused.
+
 Supported input is polygonal OBJ, **ASCII PLY** (binary PLY is rejected), DXF
 3DFACE/MESH/POLYFACE entities, or **mesh geometry in 3DM** (Brep/NURBS-only
 files are rejected; mesh them before export). Select ASCII when exporting PLY.
