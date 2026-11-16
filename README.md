@@ -138,7 +138,8 @@ problem, so four independent constraints are enforced, each recorded with its nu
   triangulation noise floor), guarded against non-height-field / folded meshes (kills
   the fold that produces perfectly-planar-but-not-the-building geometry).
 
-Triangulated meshes are flagged `DODGE_TRIANGULATED` (the task was planar *quads*).
+Every face must be a quad: any triangles trigger `DODGE_TRIANGULATED`; other
+non-quad panels trigger `NON_QUAD_PANELS`. Mixed-face meshes cannot pass.
 **Quality** (min interior angle, aspect ratio, degenerate-panel count) is measured and
 recorded but is a **graded axis, not a hard gate** — a quality+planar solution exists
 but is hard, so gating on it would be unfair; egregious collapse still trips

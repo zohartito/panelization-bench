@@ -21,8 +21,8 @@ its numbers (not just pass/fail):
               produces) is not a solution. Kills the fold / flatten cheats.
 
 Faces are classified by vertex count: quad (4) scored; triangle (3) planarity is
-trivially 0 -- a mostly-triangle mesh has DODGED the planar-quad problem, flagged
-not passed; ngon (>4) planarity still measured, flagged separately.
+trivially 0 -- any triangle has DODGED the planar-quad problem. Any non-quad
+face prevents a pass; ngon (>4) planarity is still measured for diagnostics.
 
 QUALITY (min interior angle, aspect ratio, degenerate-panel count) is measured and
 recorded but NOT a hard gate by default: a facade of planar slivers is not
@@ -589,7 +589,7 @@ def _trilemma_corner(r: dict) -> str:
     technique and hit the known boundary problem' from 'gave up'. Maps every run
     to the three measured reference corners."""
     p = r["planarity_mm"]
-    planar = bool(p["quads_total"] and p["quads_failing_tol"] == 0)
+    planar = r["checks"]["all_quads"]["pass"] and p["quads_failing_tol"] == 0
     quality = r["quality"]["min_angle_deg_worst"] >= 20.0 and r["face_breakdown"]["quads"] > 0
     cov = r["coverage"]
     if cov is None:
@@ -627,8 +627,12 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
         "median_edge_m": r["module_m"]["median_edge"], "band": list(thr.module_band),
     }
     checks["not_triangulated"] = {
-        "pass": fb["quads"] > 0 and fb["triangles"] <= fb["quads"],
+        "pass": fb["triangles"] == 0,
         "quads": fb["quads"], "triangles": fb["triangles"],
+    }
+    checks["all_quads"] = {
+        "pass": fb["quads"] > 0 and fb["quads"] == r["panel_count"],
+        **fb,
     }
     if r["coverage"] is not None:
         checks["coverage"] = {
@@ -665,6 +669,7 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
     order = [
         ("height_field", "NON_HEIGHTFIELD"),
         ("not_triangulated", "DODGE_TRIANGULATED"),
+        ("all_quads", "NON_QUAD_PANELS"),
         ("coverage", "INCOMPLETE_COVERAGE"),
         ("module", "MODULE_VIOLATION"),
         ("off_surface", "OFF_SURFACE"),
