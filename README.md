@@ -127,8 +127,10 @@ problem, so four independent constraints are enforced, each recorded with its nu
 - **COVERAGE** — panel-area ratio to the reference + largest gap from a surface sample
   to the nearest panel (kills panelize-10 %-and-stop).
 - **OFF-SURFACE** — exact analytic vertical deviation `|z_v − f(x_v,y_v)|` (no
-  triangulation noise floor), guarded against non-height-field / folded meshes (kills
-  the fold that produces perfectly-planar-but-not-the-building geometry).
+  triangulation noise floor). A vertex-pair heuristic flags pairs within 1 mm in
+  plan and over 50 mm apart in height. It does not detect general projected-face
+  overlaps or certify that a mesh is a height field; shifted layers and folded
+  strips can evade this heuristic.
 
 With a reference, the mesh must also form one connected manifold canopy with
 matching Euler characteristic. Per-panel vertex copies are welded on a 1 µm

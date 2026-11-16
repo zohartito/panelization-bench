@@ -481,9 +481,9 @@ def off_surface_analytic(V: np.ndarray, surface_z, fold_xy_tol: float = 1e-3,
 
     Vertical distance is an upper bound on true perpendicular distance (they
     differ by 1/sqrt(1+|grad f|^2)), i.e. conservative, which is the safe
-    direction. This is only meaningful if the mesh is a height field; a folded /
-    overhanging mesh (two vertices at the same x,y, different z) makes vertical
-    distance nonsense, so we detect that and let the caller trip a verdict."""
+    direction. The fold check is only a vertex-pair heuristic: pairs within
+    fold_xy_tol in plan and over fold_z_tol apart in height are flagged. It does
+    not detect projected-face overlaps or certify a height field."""
     from scipy.spatial import cKDTree
 
     xy = V[:, :2]
@@ -726,8 +726,8 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
         "max_mm": r["planarity_mm"]["max"],
     }
 
-    # precedence: fundamental problems first. A non-height-field (folded/
-    # overhanging) mesh makes off-surface unreliable, so it headlines. Then
+    # Precedence: fundamental problems first. Detected vertex-pair folds
+    # headline; this heuristic does not certify a height field. Then
     # triangulation (the task was planar QUADS), coverage, module, and so on.
     order = [
         ("height_field", "NON_HEIGHTFIELD"),
