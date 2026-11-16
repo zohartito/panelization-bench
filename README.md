@@ -53,12 +53,13 @@ caught by the scorer as `PLANARITY_FAIL`.
 **Curvature.** Negative Gaussian curvature over ≈ 50 % of the surface (mixed
 anticlastic/synclastic — the corrugation's crests/troughs are locally synclastic; this
 is structural for any sinusoidal corrugation and is realistic for freeform canopies).
-A pure-negative alternative (monkey saddle) was measured and rejected: scaled to a
-plausible ≤ 8 m canopy height it went mild (max 23 mm, 77 % fail), and its centre is a
-degenerate point where conjugate-net meshing is singular — it would score "can you
-survive a pathological point," not "can you panelize." Surface A's only degeneracy is
-its **parabolic K = 0 lines, where the surface is locally developable (a cylinder) —
-benign for panelization**, not an umbilic.
+The surface has parabolic K = 0 loci and also flat points where both principal
+curvatures vanish. For example, at x = 0, y = 0.11207710319723743 m, all three
+Hessian entries are zero. These are umbilic degeneracies: principal directions
+are not uniquely defined there. Pointwise K = 0 does not imply a developable
+neighborhood or a cylindrical patch, and no claim of benign meshing behavior
+follows from it. Earlier monkey-saddle comparisons have no shipped reproduction
+and do not establish that this surface avoids such degeneracies.
 
 ## Reference examples and their limits
 
