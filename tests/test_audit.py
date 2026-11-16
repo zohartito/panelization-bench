@@ -92,3 +92,33 @@ def test_pzb02_seams_holes_and_boundary():
     shifted = score.Mesh(ref.vertices + [0.3, 0, 0], ref.faces)
     r = score.score_mesh(shifted, reference=ref, surface_z=lambda x, y: 0)
     assert r["verdict"] == "INVALID_CONNECTIVITY"
+
+
+import json
+import runner
+
+
+def test_pzb03_completion_timing():
+    rec = runner.ToolCall(ts=1000, tool="slow", args_summary="", duration_ms=60000)
+    r = runner.summarize_transcript([rec], run_start=1000)
+    assert r["time_to_first_successful_tool_call_ms"] == 60000
+    assert r["wall_time_ms"] == 60000
+
+
+def test_pzb03_evaluate_preserves_setup_and_end(tmp_path, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(runner.time, "time", lambda: clock[0])
+    transcript, report = tmp_path / "calls.jsonl", tmp_path / "report.json"
+    logger = runner.ToolCallLogger(transcript)
+    clock[0] += 0.3
+    with logger.call("work", ""):
+        clock[0] += 0.5
+    clock[0] += 0.2
+    logger.finish()
+    runner.main(["evaluate", "--lane", "ezdxf-control", "--transcript", str(transcript),
+                 "--json", str(report)])
+    r = json.loads(report.read_text())
+    assert r["catalog"]["time_to_first_successful_tool_call_ms"] == pytest.approx(800)
+    assert r["catalog"]["wall_time_ms"] == pytest.approx(1000)
+    assert r["run_start"] == 1000
+    assert r["run_end"] == pytest.approx(1001)

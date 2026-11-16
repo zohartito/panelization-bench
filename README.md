@@ -187,6 +187,12 @@ Because the control lane needs no app, the whole harness is exercisable now:
 python3 runner.py selftest      # drives ezdxf end-to-end -> FALSE_SUCCESS (naive grid)
 ```
 
+Tool readiness uses the first successful call's completion time. Create the
+`ToolCallLogger` before setup and call `logger.finish()` after the final export;
+its adjacent `.jsonl.timing.json` file persists actual start/end timestamps for
+`evaluate`. Legacy transcripts without complete timing metadata use available
+call bounds and emit a warning: unrecorded setup/finalization time is unknown.
+
 ## Layout
 
 ```

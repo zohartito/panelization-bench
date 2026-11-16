@@ -113,8 +113,21 @@ class ToolCallLogger:
     def __init__(self, path: Path | None = None):
         self.path = path
         self.records: list[ToolCall] = []
+        self.run_start = time.time()
+        self.run_end = None
         if path:
             path.write_text("")
+            self._save_timing()
+
+    def _save_timing(self):
+        if self.path:
+            self.path.with_suffix(self.path.suffix + ".timing.json").write_text(
+                json.dumps({"run_start": self.run_start, "run_end": self.run_end}))
+
+    def finish(self):
+        """Persist the end after setup, calls and any final export work."""
+        self.run_end = time.time()
+        self._save_timing()
 
     class _Ctx:
         def __init__(self, logger, rec):
@@ -153,7 +166,8 @@ def load_transcript(path: Path) -> list[ToolCall]:
     return out
 
 
-def summarize_transcript(records: list[ToolCall], run_start: float) -> dict:
+def summarize_transcript(records: list[ToolCall], run_start: float,
+                         run_end: float | None = None) -> dict:
     """Distill the transcript into the failure catalog."""
     per_tool: dict[str, dict] = {}
     first_ok_ms = None
@@ -163,8 +177,9 @@ def summarize_transcript(records: list[ToolCall], run_start: float) -> dict:
         t["total_ms"] += r.duration_ms
         if not r.ok:
             t["errors"] += 1
-        if r.ok and first_ok_ms is None:
-            first_ok_ms = (r.ts - run_start) * 1000.0
+        if r.ok:
+            completed_ms = (r.ts - run_start) * 1000.0 + r.duration_ms
+            first_ok_ms = completed_ms if first_ok_ms is None else min(first_ok_ms, completed_ms)
     errors = [{"tool": r.tool, "args": r.args_summary, "error": r.error}
               for r in records if not r.ok]
     return {
@@ -172,7 +187,9 @@ def summarize_transcript(records: list[ToolCall], run_start: float) -> dict:
         "successful_tool_calls": sum(1 for r in records if r.ok),
         "failed_tool_calls": len(errors),
         "time_to_first_successful_tool_call_ms": first_ok_ms,
-        "wall_time_ms": (records[-1].ts - run_start) * 1000.0 if records else 0.0,
+        "wall_time_ms": ((run_end - run_start) * 1000.0 if run_end is not None else
+                         max(((r.ts - run_start) * 1000.0 + r.duration_ms
+                              for r in records), default=0.0)),
         "per_tool": per_tool,
         "errors": errors,
     }
@@ -264,9 +281,10 @@ def assign_run_verdict(catalog: dict, geometry: dict | None,
 def evaluate_run(lane: str, model: str, records: list[ToolCall], run_start: float,
                  mesh_path: Path | None, agent_claimed_success: bool,
                  agent_reported_planarity: bool, units: str = "m",
-                 reference: Path = REFERENCE, surface_def: Path = SURFACE_DEF) -> dict:
+                 reference: Path = REFERENCE, surface_def: Path = SURFACE_DEF,
+                 run_end: float | None = None) -> dict:
     stack, stack_warnings = probe_stack(lane, model)
-    catalog = summarize_transcript(records, run_start)
+    catalog = summarize_transcript(records, run_start, run_end)
 
     geometry = None
     if mesh_path and Path(mesh_path).exists():
@@ -283,6 +301,8 @@ def evaluate_run(lane: str, model: str, records: list[ToolCall], run_start: floa
                                  agent_reported_planarity)
     return {
         "schema": SCHEMA,
+        "run_start": run_start,
+        "run_end": run_end,
         "lane": lane,
         "run_verdict": verdict,
         "geometry_verdict": geometry["verdict"] if geometry else None,
@@ -333,11 +353,13 @@ def selftest(workdir: Path, model: str = "harness-selftest") -> dict:
     transcript = workdir / "selftest.jsonl"
     out_dxf = workdir / "selftest_panels.dxf"
     logger = ToolCallLogger(transcript)
-    run_start = time.time()
+    run_start = logger.run_start
     _ezdxf_weak_agent(logger, out_dxf)
+    logger.finish()
     # the weak agent claims success but never measured planarity
     return evaluate_run("ezdxf-control", model, logger.records, run_start, out_dxf,
-                        agent_claimed_success=True, agent_reported_planarity=False)
+                        agent_claimed_success=True, agent_reported_planarity=False,
+                        run_end=logger.run_end)
 
 
 # --------------------------------------------------------------------------- #
@@ -356,6 +378,8 @@ def _print_record(rec: dict) -> None:
           f"plugin={s.get('plugin_or_backend')} | model={s.get('driving_model')}")
     for w in rec["stack_warnings"]:
         print(f"  STACK WARNING: {w}")
+    for warning in rec.get("timing_warnings", []):
+        print(f"  TIMING WARNING: {warning}")
     c = rec["catalog"]
     print(f"  catalog: {c['successful_tool_calls']}/{c['total_tool_calls']} tool "
           f"calls ok, {c['failed_tool_calls']} errors, wall {c['wall_time_ms']:.0f} ms")
@@ -396,9 +420,18 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "evaluate":
         records = load_transcript(args.transcript)
-        run_start = records[0].ts if records else time.time()
+        timing_path = args.transcript.with_suffix(args.transcript.suffix + ".timing.json")
+        timing = json.loads(timing_path.read_text()) if timing_path.exists() else {}
+        run_start = timing.get("run_start", min((r.ts for r in records), default=time.time()))
+        run_end = timing.get("run_end")
         rec = evaluate_run(args.lane, args.model, records, run_start, args.mesh,
-                           args.claimed_success, args.reported_planarity, args.units)
+                           args.claimed_success, args.reported_planarity, args.units,
+                           run_end=run_end)
+        rec["timing_warnings"] = []
+        if not timing or run_end is None:
+            rec["timing_warnings"].append(
+                "Incomplete run timing metadata: elapsed time uses available call bounds; "
+                "unrecorded setup/finalization time is unknown.")
     else:  # selftest
         rec = selftest(args.workdir)
 

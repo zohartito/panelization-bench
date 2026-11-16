@@ -27,7 +27,7 @@ def test_summarize_counts_and_first_success():
     assert s["total_tool_calls"] == 3
     assert s["successful_tool_calls"] == 2
     assert s["failed_tool_calls"] == 1
-    assert s["time_to_first_successful_tool_call_ms"] == 500.0  # first OK at t0+0.5
+    assert s["time_to_first_successful_tool_call_ms"] == 510.0  # first OK completes at t0+0.51
     assert s["per_tool"]["a"]["errors"] == 1
 
 
