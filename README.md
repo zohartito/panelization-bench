@@ -221,11 +221,15 @@ python3 reference/generate_surface.py
 python3 reference/build_reference_solution.py
 python3 -m pytest tests/ -q
 python3 runner.py selftest
-# score any exported artifact:
+# score a supported exported mesh:
 python3 score.py <mesh.obj|.ply|.dxf|.3dm> \
     --reference reference/canopy_reference.obj \
     --surface-def reference/surface_def.py --units m
 ```
+
+Supported input is polygonal OBJ, **ASCII PLY** (binary PLY is rejected), DXF
+3DFACE/MESH/POLYFACE entities, or **mesh geometry in 3DM** (Brep/NURBS-only
+files are rejected; mesh them before export). Select ASCII when exporting PLY.
 
 Everything is deterministic and version-pinned so the benchmark cannot silently change
 its own results — the same principle as the per-run `stack` block, one level down.

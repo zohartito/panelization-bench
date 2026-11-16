@@ -26,7 +26,8 @@ It is provided two equivalent ways — use whichever suits your engine:
 2. **Every panel must be planar to within 5 mm** — i.e. its four corners must lie
    within 5 mm of a common plane. This is the binding constraint.
 3. **Export the panelized geometry** to a neutral format — `.obj`, `.ply`, `.dxf`,
-   or `.3dm` — in **meters**. State the file path.
+   or `.3dm` — in **meters**. PLY must be ASCII; 3DM must contain mesh geometry
+   (mesh Breps/NURBS before export). DXF supports 3DFACE/MESH/POLYFACE. State the file path.
 4. **Report**, in your final answer:
    - the total panel count,
    - the **maximum planarity deviation** across all panels, in millimeters,
