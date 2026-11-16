@@ -293,4 +293,6 @@ For args (e.g. `/runscript`), point `/TR` at a small `.cmd` launcher instead of 
 - `rhino_framed_client.py` — 0.3.2 framed-protocol client; run through the tunnel once
   `mcpstart` is active to pull real Rhino data (`get_document_info`).
 - `ezdxf_quad_smoke.py` — headless planar-quad DXF proof (the `ezdxf-headless` control lane,
-  not AutoCAD the app); run with the `autocad-mcp-pro` venv's python. Writes `panels_smoke.dxf`.
+  not AutoCAD the app); run with the `autocad-mcp-pro` venv's python. Writes
+  `panels_smoke.dxf` in the caller's directory, or use `--output path/to/panels.dxf`
+  (missing parent directories are created).

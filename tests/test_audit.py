@@ -195,3 +195,22 @@ def test_pzb30_dependencies_have_hash_locked_closure():
               if "==" in line and not line.startswith("#")}
     assert direct <= names
     assert {"fastmcp", "mcp", "pydantic", "cryptography"} <= names
+
+
+import runpy
+import ezdxf
+
+
+def test_pzb13_smoke_uses_requested_output(tmp_path, monkeypatch, capsys):
+    out = tmp_path / "new" / "panels.dxf"
+    script = ROOT / "pc/scripts/ezdxf_quad_smoke.py"
+    save = ezdxf.document.Drawing.saveas
+    def guarded_save(doc, filename, *args, **kwargs):
+        # Prevent the pre-fix script from writing to its obsolete absolute path.
+        assert Path(filename) == out, "Smoke script ignored the caller's output path"
+        return save(doc, filename, *args, **kwargs)
+    monkeypatch.setattr(ezdxf.document.Drawing, "saveas", guarded_save)
+    monkeypatch.setattr(sys, "argv", [str(script), "--output", str(out)])
+    runpy.run_path(str(script), run_name="__main__")
+    assert len(ezdxf.readfile(out).modelspace().query("3DFACE")) == 28
+    assert "HEADLESS_EZDXF_OK" in capsys.readouterr().out
