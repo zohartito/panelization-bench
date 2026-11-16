@@ -75,7 +75,7 @@ SVD metric; reference-net values are measured on the saved OBJ coordinates.
 |---|---|---|---|
 | naive 27×13 UV grid | 103 mm | median min angle 88°, 0 slivers | whole canopy, ~1.5 m |
 | principal curvature-line patch | 0.000445 mm | median min angle 87°, 0 slivers | 1.78×1.92 m patch, **0.078 m median edge** |
-| arbitrary conjugate net | 0.000505 mm | median min angle 1.3°, 310/351 slivers | area ratio 0.086; fails coverage |
+| arbitrary conjugate net | 0.000505 mm | median min angle 1.2°, 308/351 slivers | area ratio 0.086; fails coverage |
 
 The small principal patch demonstrates planar quads with good angles at an 8 cm
 module, far below the permitted module band. It is not evidence that the same
