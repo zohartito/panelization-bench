@@ -188,13 +188,15 @@ runner.py                      run harness (stack / reachability / catalog / ver
 prompt/task_prompt.v1.md       the engine-neutral task brief (versioned)
 tests/                         25 tests (16 scorer exact-answer, 9 harness)
 pc/PC-ENGINES.md               sibling: PC engine eligibility + friction matrix
-requirements.txt               pinned deps (the benchmark must not drift under a bump)
+requirements.txt               direct dependency pins (portable, transitives float)
+requirements-macos-arm64-py311.lock  hashed dependency closure for the verified platform
 ```
 
 ## Reproduce
 
 ```
-pip install -r requirements.txt
+# Verified lock: CPython 3.11 on macOS arm64
+python3 -m pip install --require-hashes -r requirements-macos-arm64-py311.lock
 python3 reference/generate_surface.py
 python3 reference/build_reference_solution.py
 python3 -m pytest tests/ -q
@@ -209,8 +211,12 @@ Supported input is polygonal OBJ, **ASCII PLY** (binary PLY is rejected), DXF
 3DFACE/MESH/POLYFACE entities, or **mesh geometry in 3DM** (Brep/NURBS-only
 files are rejected; mesh them before export). Select ASCII when exporting PLY.
 
-Everything is deterministic and version-pinned so the benchmark cannot silently change
-its own results — the same principle as the per-run `stack` block, one level down.
+The hashed lock includes direct and transitive packages for the verified CPython
+3.11/macOS arm64 environment. It was installed and tested with Python 3.11.7;
+it does not promise identical floating-point results on other interpreters or
+platforms. The existing CI runs Ubuntu/Python 3.11 using `requirements.txt`, which
+pins direct dependencies only. That portable recipe remains available, but its
+transitive packages can drift; it is not a locked cross-platform install.
 Do **not** run against live engines without opening the app first; that is the
 orchestrator's call.
 

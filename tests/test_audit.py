@@ -179,3 +179,19 @@ def test_pzb08_cli_requires_units(tmp_path, capsys):
         score.main([str(path)])
     assert exc.value.code == 2
     assert "--units" in capsys.readouterr().err
+
+
+import re
+
+
+def test_pzb30_dependencies_have_hash_locked_closure():
+    lock = ROOT / "requirements-macos-arm64-py311.lock"
+    assert lock.exists(), "The install must include a transitive, hashed dependency lock"
+    entries = [line for line in lock.read_text().splitlines() if line and not line.startswith("#")]
+    assert all(re.fullmatch(r"[a-z0-9_.-]+==[^ ]+ --hash=sha256:[0-9a-f]{64}", line)
+               for line in entries)
+    names = {line.split("==")[0] for line in entries}
+    direct = {line.split("==")[0] for line in (ROOT / "requirements.txt").read_text().splitlines()
+              if "==" in line and not line.startswith("#")}
+    assert direct <= names
+    assert {"fastmcp", "mcp", "pydantic", "cryptography"} <= names
