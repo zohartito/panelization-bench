@@ -245,3 +245,18 @@ def test_pzb14_report_explicit_replacement(tmp_path):
     with pytest.raises(FileExistsError):
         score.write_json_report(link, {}, overwrite=True)
     assert victim.read_text() == "ORIGINAL"
+
+
+def test_pzb16_generator_reports_saved_precision(tmp_path, monkeypatch, capsys):
+    monkeypatch.syspath_prepend(str(ROOT / "reference"))
+    from reference import build_reference_solution as builder
+    monkeypatch.setattr(builder, "HERE", tmp_path)
+    builder.main()
+    output = capsys.readouterr().out
+    reported = [float(value) for value in re.findall(r"planarity max ([0-9.e+-]+) mm", output)]
+    paths = [tmp_path / "canopy_gold_planar.obj", tmp_path / "canopy_gold_principal_patch.obj"]
+    saved = [max(score.planarity_deviation_m(m.vertices[f]) for f in m.faces) * 1000
+             for m in map(score.load_mesh, paths)]
+    assert reported == pytest.approx(saved, rel=0.001)
+    assert "full coverage" not in paths[0].read_text().splitlines()[0].lower()
+    assert "INCOMPLETE_COVERAGE" in output
