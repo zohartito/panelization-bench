@@ -172,7 +172,10 @@ Run-level verdicts are kept distinct: `NEVER_REACHED_ENGINE` (transport/setup),
 `REACHED_TASK_FAILED` (reached, gave up), **`FALSE_SUCCESS`** (declared success,
 geometry failed — the motivating case, detected by cross-checking the agent's claim
 against the independent score), `PASS_NO_SELF_CHECK` (good geometry, never measured —
-may be luck), and `PASS` (good geometry AND measured).
+may be luck), and `PASS` (good geometry AND measured). A geometric
+`PASS_UNBUILDABLE` remains `PASS_UNBUILDABLE` at run level, or
+`PASS_UNBUILDABLE_NO_SELF_CHECK` when the agent did not report planarity,
+regardless of its success claim.
 
 **Lanes** (`runner.py list-lanes`): `ezdxf-control` is the **control — a DXF library,
 not an application** (0 human steps, no app, the zero point on the friction axis);

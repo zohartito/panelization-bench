@@ -122,3 +122,23 @@ def test_pzb03_evaluate_preserves_setup_and_end(tmp_path, monkeypatch):
     assert r["catalog"]["wall_time_ms"] == pytest.approx(1000)
     assert r["run_start"] == 1000
     assert r["run_end"] == pytest.approx(1001)
+
+
+@pytest.mark.parametrize("lane", ["blender", "rhino-community", "rhino-mcneel"])
+def test_pzb05_unknown_components_warn(lane, monkeypatch):
+    # Never inspect an installed desktop app or a real user's plugin directory.
+    monkeypatch.setattr(runner, "_app_version", lambda path: "1.0")
+    monkeypatch.setattr(runner, "_rhino_plugin_version", lambda: "unknown")
+    monkeypatch.setattr(runner, "_pkg_version", lambda name: "unknown")
+    stack, warnings = runner.probe_stack(lane, "test-model")
+    assert "unknown" in stack["mcp_server"].lower()
+    assert any("stack.mcp_server" in w for w in warnings)
+    assert any("stack.plugin_or_backend" in w for w in warnings)
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+@pytest.mark.parametrize("reported", [False, True])
+def test_pzb06_unbuildable_is_qualified_pass(claimed, reported):
+    r = runner.assign_run_verdict({"successful_tool_calls": 3},
+                                 {"verdict": "PASS_UNBUILDABLE"}, claimed, reported)
+    assert r == ("PASS_UNBUILDABLE" if reported else "PASS_UNBUILDABLE_NO_SELF_CHECK")

@@ -241,19 +241,22 @@ def probe_stack(lane: str, model: str) -> tuple[dict, list[str]]:
         })
     elif lane == "blender":
         stack.update({
-            "mcp_server": "blender-mcp (uvx; resolve at runtime)",
+            "mcp_server": "blender-mcp unknown",
             "host_app": f"Blender {_app_version(Path('/Applications/Blender.app'))}",
             "plugin_or_backend": "blender-mcp addon (bl_info at runtime) -- unknown",
         })
     elif lane in ("rhino-community", "rhino-mcneel"):
         stack.update({
-            "mcp_server": "rhinomcp / RhinoMCP (resolve at runtime)",
+            "mcp_server": "rhinomcp / RhinoMCP unknown",
             "host_app": f"Rhino {_app_version(Path('/Applications/Rhino 8.app'))}",
             "plugin_or_backend": f"rhino plugin {_rhino_plugin_version()}",
         })
     else:
         stack.update({"mcp_server": "unknown", "host_app": "unknown",
                       "plugin_or_backend": "unknown"})
+    for key in ("mcp_server", "host_app", "plugin_or_backend", "driving_model"):
+        if not stack.get(key):
+            stack[key] = "unknown"
     warnings = [f"stack.{k} is UNKNOWN -- run is not fully attributable"
                 for k, v in stack.items() if isinstance(v, str) and "unknown" in v.lower()]
     return stack, warnings
@@ -269,8 +272,9 @@ def assign_run_verdict(catalog: dict, geometry: dict | None,
         return "NEVER_REACHED_ENGINE"
     if geometry is None or geometry.get("verdict") == "EMPTY":
         return "REACHED_TASK_FAILED"
-    if geometry["verdict"] == "PASS":
-        return "PASS" if agent_reported_planarity else "PASS_NO_SELF_CHECK"
+    if geometry["verdict"] in ("PASS", "PASS_UNBUILDABLE"):
+        qualification = geometry["verdict"]
+        return qualification if agent_reported_planarity else qualification + "_NO_SELF_CHECK"
     # geometry failed
     return "FALSE_SUCCESS" if agent_claimed_success else "REACHED_TASK_FAILED"
 
