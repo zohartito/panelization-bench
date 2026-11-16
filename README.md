@@ -129,7 +129,7 @@ recorded but is a **graded axis, not a hard gate** — full-task feasibility at 
 an agent that panelized a random tenth of the surface and quit.
 
 The scorer CLI requires `--units` (use `auto` to guess with a loud warning) — a scorer that
-silently compares mm to m is worthless. `score.py` is covered by 16 exact-answer tests
+silently compares mm to m is worthless. `score.py` is covered by exact-answer and audit regression tests
 (a saddle quad reads its analytic deviation `h` exactly; a tilted planar quad reads 0,
 proving best-fit-plane SVD; the unit trap; point-to-triangle by hand; every cheat
 verdict).
@@ -187,7 +187,7 @@ reference/
 score.py                       neutral geometry judge
 runner.py                      run harness (stack / reachability / catalog / verdicts)
 prompt/task_prompt.v1.md       the engine-neutral task brief (versioned)
-tests/                         25 tests (16 scorer exact-answer, 9 harness)
+tests/                         scorer, harness and audit regression tests
 pc/PC-ENGINES.md               sibling: PC engine eligibility + friction matrix
 requirements.txt               direct dependency pins (portable, transitives float)
 requirements-macos-arm64-py311.lock  hashed dependency closure for the verified platform
