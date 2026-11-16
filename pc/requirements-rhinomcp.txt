@@ -1,0 +1,2 @@
+# Optional client paired with the documented Rhino plugin; not needed by scorer tests.
+rhinomcp==0.3.2

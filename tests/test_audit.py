@@ -1,0 +1,326 @@
+"""Regression probes for the confirmed public-repository audit findings."""
+
+import hashlib
+from pathlib import Path
+import subprocess
+import sys
+
+import numpy as np
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+import score
+from reference import surface_def as sd
+
+
+def canopy():
+    xs, ys = np.linspace(-20, 20, 28), np.linspace(-10, 10, 14)
+    vertices = np.array([(x, y, sd.z_of(x, y)) for y in ys for x in xs])
+    faces = [[j * 28 + i, j * 28 + i + 1, (j + 1) * 28 + i + 1,
+              (j + 1) * 28 + i] for j in range(13) for i in range(27)]
+    return score.Mesh(vertices, faces)
+
+
+def judged(mesh):
+    return score.score_mesh(mesh, units="m", reference=canopy(), surface_z=sd.z_of)
+
+
+def test_pzb01_mixed_ngons_cannot_pass():
+    m = canopy()
+    keep = min(range(len(m.faces)),
+               key=lambda i: score.planarity_deviation_m(m.vertices[m.faces[i]]))
+    vertices = m.vertices.tolist()
+    for i, face in enumerate(m.faces):
+        if i != keep:
+            x, y = m.vertices[face[:2], :2].mean(axis=0)
+            vertices.append([x, y, sd.z_of(x, y)])
+            face.insert(1, len(vertices) - 1)
+    m.vertices = np.array(vertices)
+    r = judged(m)
+    assert r["face_breakdown"] == {"quads": 1, "triangles": 0, "ngons": 350}
+    assert r["ngon_planarity_mm_max"] > 100
+    assert not r["verdict"].startswith("PASS")
+    assert r["trilemma_corner"] != "ALL_THREE"
+
+
+def test_pzb01_mixed_triangles_cannot_pass():
+    v = np.array([[0, 0, 0], [1.5, 0, 0], [1.5, 1.5, 0], [0, 1.5, 0], [3, 0, 0]])
+    r = score.score_mesh(score.Mesh(v, [[0, 1, 2, 3], [1, 4, 2]]))
+    assert r["verdict"] == "DODGE_TRIANGULATED"
+
+
+def flattened_panels():
+    m = canopy()
+    vertices = []
+    for face in m.faces:
+        q = m.vertices[face]
+        center = q.mean(0)
+        normal = np.linalg.svd(q - center, full_matrices=False)[2][-1]
+        vertices.extend(q - ((q - center) @ normal)[:, None] * normal)
+    return score.Mesh(np.array(vertices),
+                      [list(range(i, i + 4)) for i in range(0, len(vertices), 4)])
+
+
+def test_pzb02_disconnected_flattening_cannot_pass():
+    r = judged(flattened_panels())
+    assert r["planarity_mm"]["max"] < 1e-8
+    assert 100 < r["off_surface_mm"]["max_mm"] < 250
+    assert not r["verdict"].startswith("PASS")
+    assert r["trilemma_corner"] != "ALL_THREE"
+
+
+def test_pzb02_reference_par_ignores_submission_components():
+    r = judged(flattened_panels())
+    assert r["topology"]["euler_characteristic"] == 351
+    assert r["topology"]["par"] == 0
+    assert r["topology"]["excess"] == r["topology"]["vertex_score"] > 0
+
+
+def flat_grid(n=4):
+    v = np.array([(x * 1.5, y * 1.5, 0) for y in range(n + 1) for x in range(n + 1)])
+    f = [[j*(n+1)+i, j*(n+1)+i+1, (j+1)*(n+1)+i+1, (j+1)*(n+1)+i]
+         for j in range(n) for i in range(n)]
+    return score.Mesh(v, f)
+
+
+def test_pzb02_seams_holes_and_boundary():
+    ref = flat_grid()
+    split = score.Mesh(np.array([ref.vertices[i] for f in ref.faces for i in f]),
+                       [list(range(i, i+4)) for i in range(0, 64, 4)])
+    assert score.score_mesh(split, reference=ref)["verdict"] == "PASS"
+    hole = score.Mesh(ref.vertices, ref.faces[:5] + ref.faces[6:])
+    assert score.score_mesh(hole, reference=ref)["verdict"] == "INVALID_CONNECTIVITY"
+    shifted = score.Mesh(ref.vertices + [0.3, 0, 0], ref.faces)
+    r = score.score_mesh(shifted, reference=ref, surface_z=lambda x, y: 0)
+    assert r["verdict"] == "INVALID_CONNECTIVITY"
+
+
+@pytest.mark.parametrize("moved_reference", [False, True])
+@pytest.mark.parametrize("offset, verdict", [(0.25, "PASS"), (0.4, "INVALID_CONNECTIVITY")])
+def test_pzb02_boundary_corner_second_endpoint(moved_reference, offset, verdict):
+    ref = flat_grid()
+    vertices = ref.vertices.copy()
+    # The top-right corner is the second endpoint of both sorted boundary edges.
+    vertices[-1, 0] += offset
+    mesh = score.Mesh(vertices, ref.faces)
+    if moved_reference:
+        mesh, ref = ref, mesh
+    r = score.score_mesh(mesh, reference=ref, surface_z=lambda x, y: 0)
+    assert all(check["pass"] for name, check in r["checks"].items()
+               if name != "connectivity")
+    assert r["connectivity"]["boundary_gap_m"] == pytest.approx(offset)
+    assert r["verdict"] == verdict
+
+
+import json
+import runner
+
+
+def test_pzb03_completion_timing():
+    rec = runner.ToolCall(ts=1000, tool="slow", args_summary="", duration_ms=60000)
+    r = runner.summarize_transcript([rec], run_start=1000)
+    assert r["time_to_first_successful_tool_call_ms"] == 60000
+    assert r["wall_time_ms"] == 60000
+
+
+def test_pzb03_evaluate_preserves_setup_and_end(tmp_path, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(runner.time, "time", lambda: clock[0])
+    transcript, report = tmp_path / "calls.jsonl", tmp_path / "report.json"
+    logger = runner.ToolCallLogger(transcript)
+    clock[0] += 0.3
+    with logger.call("work", ""):
+        clock[0] += 0.5
+    clock[0] += 0.2
+    logger.finish()
+    runner.main(["evaluate", "--lane", "ezdxf-control", "--transcript", str(transcript),
+                 "--json", str(report)])
+    r = json.loads(report.read_text())
+    assert r["catalog"]["time_to_first_successful_tool_call_ms"] == pytest.approx(800)
+    assert r["catalog"]["wall_time_ms"] == pytest.approx(1000)
+    assert r["run_start"] == 1000
+    assert r["run_end"] == pytest.approx(1001)
+
+
+@pytest.mark.parametrize("lane", ["blender", "rhino-community", "rhino-mcneel"])
+def test_pzb05_unknown_components_warn(lane, monkeypatch):
+    # Never inspect an installed desktop app or a real user's plugin directory.
+    monkeypatch.setattr(runner, "_app_version", lambda path: "1.0")
+    monkeypatch.setattr(runner, "_rhino_plugin_version", lambda: "unknown")
+    monkeypatch.setattr(runner, "_pkg_version", lambda name: "unknown")
+    stack, warnings = runner.probe_stack(lane, "test-model")
+    assert "unknown" in stack["mcp_server"].lower()
+    assert any("stack.mcp_server" in w for w in warnings)
+    assert any("stack.plugin_or_backend" in w for w in warnings)
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+@pytest.mark.parametrize("reported", [False, True])
+def test_pzb06_unbuildable_is_qualified_pass(claimed, reported):
+    r = runner.assign_run_verdict({"successful_tool_calls": 3},
+                                 {"verdict": "PASS_UNBUILDABLE"}, claimed, reported)
+    assert r == ("PASS_UNBUILDABLE" if reported else "PASS_UNBUILDABLE_NO_SELF_CHECK")
+
+
+@pytest.mark.parametrize("shift", [0.0, 0.002])
+def test_pzbn1_excess_coverage_fails(shift):
+    m = canopy()
+    layers = score.Mesh(np.concatenate([m.vertices, m.vertices + [shift, shift, 0.2]]),
+                        m.faces + [[i + len(m.vertices) for i in f] for f in m.faces])
+    r = judged(layers)
+    assert r["coverage"]["area_ratio"] == pytest.approx(2.0)
+    assert not r["checks"]["coverage"]["pass"]
+    assert r["trilemma_corner"] != "ALL_THREE"
+
+
+@pytest.mark.parametrize("properties, rows", [
+    (["uchar red", "float x", "float y", "float z"],
+     ["255 0 0 5", "255 1 0 6", "255 1 1 7", "255 0 1 8"]),
+    (["float z", "float x", "float confidence", "float y"],
+     ["5 0 0.5 0", "6 1 0.5 0", "7 1 0.5 1", "8 0 0.5 1"]),
+])
+def test_pzb04_ply_named_coordinates(tmp_path, properties, rows):
+    path = tmp_path / "ordered.ply"
+    header = ["ply", "format ascii 1.0", "element vertex 4"]
+    header += ["property " + p for p in properties]
+    header += ["element face 1", "property list uchar int vertex_indices", "end_header"]
+    path.write_text("\n".join(header + rows + ["4 0 1 2 3"]))
+    mesh = score.load_mesh(path)
+    np.testing.assert_array_equal(mesh.vertices, [[0, 0, 5], [1, 0, 6], [1, 1, 7], [0, 1, 8]])
+    assert mesh.faces == [[0, 1, 2, 3]]
+
+
+def test_pzb08_cli_requires_units(tmp_path, capsys):
+    path = tmp_path / "mesh.obj"
+    path.write_text("v 0 0 0\nv 1500 0 0\nv 1500 1500 0\nv 0 1500 0\nf 1 2 3 4\n")
+    with pytest.raises(SystemExit) as exc:
+        score.main([str(path)])
+    assert exc.value.code == 2
+    assert "--units" in capsys.readouterr().err
+
+
+import re
+
+
+def test_pzb30_dependencies_have_hash_locked_closure():
+    lock = ROOT / "requirements-macos-arm64-py311.lock"
+    assert lock.exists(), "The install must include a transitive, hashed dependency lock"
+    entries = [line for line in lock.read_text().splitlines() if line and not line.startswith("#")]
+    assert all(re.fullmatch(r"[a-z0-9_.-]+==[^ ]+ --hash=sha256:[0-9a-f]{64}", line)
+               for line in entries)
+    names = {line.split("==")[0] for line in entries}
+    direct = {line.split("==")[0] for line in (ROOT / "requirements.txt").read_text().splitlines()
+              if "==" in line and not line.startswith("#")}
+    assert direct <= names
+    assert {"fastmcp", "mcp", "pydantic", "cryptography"} <= names
+
+
+import runpy
+import ezdxf
+
+
+def test_pzb13_smoke_uses_requested_output(tmp_path, monkeypatch, capsys):
+    out = tmp_path / "new" / "panels.dxf"
+    script = ROOT / "pc/scripts/ezdxf_quad_smoke.py"
+    save = ezdxf.document.Drawing.saveas
+    def guarded_save(doc, filename, *args, **kwargs):
+        # Prevent the pre-fix script from writing to its obsolete absolute path.
+        assert Path(filename) == out, "Smoke script ignored the caller's output path"
+        return save(doc, filename, *args, **kwargs)
+    monkeypatch.setattr(ezdxf.document.Drawing, "saveas", guarded_save)
+    monkeypatch.setattr(sys, "argv", [str(script), "--output", str(out)])
+    runpy.run_path(str(script), run_name="__main__")
+    assert len(ezdxf.readfile(out).modelspace().query("3DFACE")) == 28
+    assert "HEADLESS_EZDXF_OK" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("symlink", [False, True])
+def test_pzb14_report_refuses_existing_destination(tmp_path, symlink):
+    mesh = tmp_path / "quad.obj"
+    mesh.write_text("v 0 0 0\nv 1.5 0 0\nv 1.5 1.5 0\nv 0 1.5 0\nf 1 2 3 4\n")
+    victim, report = tmp_path / "victim.txt", tmp_path / "report.json"
+    victim.write_text("ORIGINAL")
+    if symlink:
+        report.symlink_to(victim)
+    else:
+        report.write_text("EXISTING")
+    with pytest.raises(SystemExit) as exc:
+        score.main([str(mesh), "--units", "m", "--json", str(report)])
+    assert exc.value.code == 2
+    assert victim.read_text() == "ORIGINAL"
+    assert report.is_symlink() if symlink else report.read_text() == "EXISTING"
+
+
+def test_pzb14_report_explicit_replacement(tmp_path):
+    path = tmp_path / "report.json"
+    score.write_json_report(path, {"first": True})
+    score.write_json_report(path, {"second": True}, overwrite=True)
+    assert json.loads(path.read_text()) == {"second": True}
+    victim = tmp_path / "victim.txt"
+    victim.write_text("ORIGINAL")
+    link = tmp_path / "link.json"
+    link.symlink_to(victim)
+    with pytest.raises(FileExistsError):
+        score.write_json_report(link, {}, overwrite=True)
+    assert victim.read_text() == "ORIGINAL"
+
+
+def test_pzb16_generator_reports_saved_precision(tmp_path, monkeypatch, capsys):
+    monkeypatch.syspath_prepend(str(ROOT / "reference"))
+    from reference import build_reference_solution as builder
+    monkeypatch.setattr(builder, "HERE", tmp_path)
+    builder.main()
+    output = capsys.readouterr().out
+    reported = [float(value) for value in re.findall(r"planarity max ([0-9.e+-]+) mm", output)]
+    paths = [tmp_path / "canopy_gold_planar.obj", tmp_path / "canopy_gold_principal_patch.obj"]
+    saved = [max(score.planarity_deviation_m(m.vertices[f]) for f in m.faces) * 1000
+             for m in map(score.load_mesh, paths)]
+    assert reported == pytest.approx(saved, rel=0.001)
+    assert "full coverage" not in paths[0].read_text().splitlines()[0].lower()
+    assert "INCOMPLETE_COVERAGE" in output
+
+
+def test_pzb29_rhino_client_is_pinned_and_locked():
+    doc = (ROOT / "pc/PC-ENGINES.md").read_text()
+    assert not re.search(r"uvx rhinomcp(?!@0\.3\.2)", doc), "Unpinned runtime client"
+    lock = ROOT / "pc/requirements-rhinomcp-macos-arm64-py311.lock"
+    assert lock.exists(), "Rhino client needs an integrity-checked dependency closure"
+    assert re.search(r"^rhinomcp==0\.3\.2 --hash=sha256:[0-9a-f]{64}$", lock.read_text(), re.M)
+    assert "--require-hashes" in doc
+
+
+def test_pzb32_remote_examples_use_placeholders():
+    doc = (ROOT / "pc/PC-ENGINES.md").read_text()
+    hosts = re.findall(r"^ssh -N -L \S+ (\S+)", doc, re.M)
+    generic_hosts = bool(hosts) and all(h == "windows-host.example" for h in hosts)
+    assert generic_hosts, "Tunnel examples must use a generic hostname"
+    assert "Hostnames and account names below are placeholders" in doc
+    assert "there is one:" not in doc
+
+
+def test_pzb32_tracked_tree_has_no_private_hostname():
+    # Keep only a fingerprint; neither fixtures nor failures may disclose the name.
+    fingerprint = "49e7bdf0d9a6603491bdffc40adcc8f94eea9630428db0981599fdb1b7a79ba1"
+    width = 10
+    paths = subprocess.check_output(
+        ["git", "ls-files", "-z"], cwd=ROOT, text=True).split("\0")
+    leaked_paths = []
+    for path in filter(None, paths):
+        data = (ROOT / path).read_bytes().lower()
+        if any(hashlib.sha256(data[i:i + width]).hexdigest() == fingerprint
+               for i in range(len(data) - width + 1)):
+            leaked_paths.append(path)
+    if leaked_paths:
+        pytest.fail("Private workstation identifier in tracked files: "
+                    + ", ".join(leaked_paths), pytrace=False)
+
+
+def test_pzb05_plugin_name_is_not_a_version(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    base = tmp_path / "Library/Application Support/McNeel/Rhinoceros/packages/8.0"
+    (base / "rhinomcp").mkdir(parents=True)
+    monkeypatch.setattr(runner, "_app_version", lambda path: "1.0")
+    stack, warnings = runner.probe_stack("rhino-community", "test-model")
+    assert "unknown" in stack["plugin_or_backend"].lower()
+    assert any("stack.plugin_or_backend" in w for w in warnings)
