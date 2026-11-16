@@ -102,8 +102,9 @@ problem, so four independent constraints are enforced, each recorded with its nu
   (SVD), in mm. Tolerance 5 mm.
 - **MODULE** — median panel edge length must sit in the 0.9–2.4 m band (kills the
   subdivide-to-0.2 m dodge, where planarity is free but fabrication cost explodes).
-- **COVERAGE** — panel-area ratio to the reference + largest gap from a surface sample
-  to the nearest panel (kills panelize-10 %-and-stop).
+- **COVERAGE** — panel-area ratio to the reference must be 0.85–1.15, with largest
+  surface-sample-to-panel gap at most 2 m. The symmetric 15% area allowance rejects
+  both substantial missing area and duplicate full layers; it is not an overlap proof.
 - **OFF-SURFACE** — exact analytic vertical deviation `|z_v − f(x_v,y_v)|` (no
   triangulation noise floor). A vertex-pair heuristic flags pairs within 1 mm in
   plan and over 50 mm apart in height. It does not detect general projected-face

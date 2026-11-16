@@ -65,6 +65,7 @@ class Thresholds:
     module_target_m: float = 1.5
     module_band: tuple[float, float] = (0.9, 2.4)   # allowed median edge length
     coverage_area_min: float = 0.85     # panel area / reference area
+    coverage_area_max: float = 1.15     # symmetric 15% allowance; rejects stacked layers
     coverage_gap_max_m: float = 2.0     # largest surface-sample-to-panel gap
     off_surface_max_mm: float = 250.0   # exported vertex must be this close to surface
     flatten_z_ratio: float = 0.3        # exported z-range < ratio*reference => suspect
@@ -697,9 +698,10 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
     }
     if r["coverage"] is not None:
         checks["coverage"] = {
-            "pass": (r["coverage"]["area_ratio"] >= thr.coverage_area_min
+            "pass": (thr.coverage_area_min <= r["coverage"]["area_ratio"] <= thr.coverage_area_max
                      and r["coverage"]["max_gap_m"] <= thr.coverage_gap_max_m),
             "area_ratio": r["coverage"]["area_ratio"],
+            "area_ratio_band": [thr.coverage_area_min, thr.coverage_area_max],
             "max_gap_m": r["coverage"]["max_gap_m"],
         }
     if r["off_surface_mm"] is not None:

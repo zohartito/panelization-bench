@@ -142,3 +142,14 @@ def test_pzb06_unbuildable_is_qualified_pass(claimed, reported):
     r = runner.assign_run_verdict({"successful_tool_calls": 3},
                                  {"verdict": "PASS_UNBUILDABLE"}, claimed, reported)
     assert r == ("PASS_UNBUILDABLE" if reported else "PASS_UNBUILDABLE_NO_SELF_CHECK")
+
+
+@pytest.mark.parametrize("shift", [0.0, 0.002])
+def test_pzbn1_excess_coverage_fails(shift):
+    m = canopy()
+    layers = score.Mesh(np.concatenate([m.vertices, m.vertices + [shift, shift, 0.2]]),
+                        m.faces + [[i + len(m.vertices) for i in f] for f in m.faces])
+    r = judged(layers)
+    assert r["coverage"]["area_ratio"] == pytest.approx(2.0)
+    assert not r["checks"]["coverage"]["pass"]
+    assert r["trilemma_corner"] != "ALL_THREE"
