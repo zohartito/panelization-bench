@@ -9,8 +9,9 @@ catalog of failures that is the spec for the MCP servers to build next.
 ## What this benchmark actually measures (the thesis)
 
 It is **not**, primarily, a test of the model's geometric reasoning. The
-`ezdxf-control` lane (a headless DXF library, no application) isolates that, and any
-capable model reaches the same geometric wall in it.
+`ezdxf-control` lane (a headless DXF library, no application) helps separate
+model reasoning from application access; it does not establish a universal
+geometric limit across models.
 
 The benchmark compares the geometry and tooling an agent can reach through each
 engine. Global PQ optimizers (for example Kangaroo/ShapeOp) are candidate tools,
@@ -67,8 +68,8 @@ and do not establish that this surface avoids such degeneracies.
 The shipped examples illustrate planarity, quality and coverage tradeoffs. They do
 not establish a feasibility bound for the whole canopy at a 1.5 m module.
 `reference/build_reference_solution.py` rebuilds the two reference nets; the
-harness selftest rebuilds the naive grid. Measurements below are on saved OBJ
-coordinates, using the scorer's SVD metric:
+harness selftest rebuilds the naive grid. Measurements below use the scorer's
+SVD metric; reference-net values are measured on the saved OBJ coordinates.
 
 | example | max planarity | quality | coverage and module |
 |---|---|---|---|
@@ -183,7 +184,7 @@ call bounds and emit a warning: unrecorded setup/finalization time is unknown.
 reference/
   surface_def.py               analytic surface (single source of truth)
   generate_surface.py          -> canopy_reference.obj + surface_params.json
-  build_reference_solution.py  -> the two gold artifacts (existence proofs, not targets)
+  build_reference_solution.py  -> the two reference examples (not scoring targets)
 score.py                       neutral geometry judge
 runner.py                      run harness (stack / reachability / catalog / verdicts)
 prompt/task_prompt.v1.md       the engine-neutral task brief (versioned)
