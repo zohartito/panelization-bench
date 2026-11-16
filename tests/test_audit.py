@@ -46,3 +46,49 @@ def test_pzb01_mixed_triangles_cannot_pass():
     v = np.array([[0, 0, 0], [1.5, 0, 0], [1.5, 1.5, 0], [0, 1.5, 0], [3, 0, 0]])
     r = score.score_mesh(score.Mesh(v, [[0, 1, 2, 3], [1, 4, 2]]))
     assert r["verdict"] == "DODGE_TRIANGULATED"
+
+
+def flattened_panels():
+    m = canopy()
+    vertices = []
+    for face in m.faces:
+        q = m.vertices[face]
+        center = q.mean(0)
+        normal = np.linalg.svd(q - center, full_matrices=False)[2][-1]
+        vertices.extend(q - ((q - center) @ normal)[:, None] * normal)
+    return score.Mesh(np.array(vertices),
+                      [list(range(i, i + 4)) for i in range(0, len(vertices), 4)])
+
+
+def test_pzb02_disconnected_flattening_cannot_pass():
+    r = judged(flattened_panels())
+    assert r["planarity_mm"]["max"] < 1e-8
+    assert 100 < r["off_surface_mm"]["max_mm"] < 250
+    assert not r["verdict"].startswith("PASS")
+    assert r["trilemma_corner"] != "ALL_THREE"
+
+
+def test_pzb02_reference_par_ignores_submission_components():
+    r = judged(flattened_panels())
+    assert r["topology"]["euler_characteristic"] == 351
+    assert r["topology"]["par"] == 0
+    assert r["topology"]["excess"] == r["topology"]["vertex_score"] > 0
+
+
+def flat_grid(n=4):
+    v = np.array([(x * 1.5, y * 1.5, 0) for y in range(n + 1) for x in range(n + 1)])
+    f = [[j*(n+1)+i, j*(n+1)+i+1, (j+1)*(n+1)+i+1, (j+1)*(n+1)+i]
+         for j in range(n) for i in range(n)]
+    return score.Mesh(v, f)
+
+
+def test_pzb02_seams_holes_and_boundary():
+    ref = flat_grid()
+    split = score.Mesh(np.array([ref.vertices[i] for f in ref.faces for i in f]),
+                       [list(range(i, i+4)) for i in range(0, 64, 4)])
+    assert score.score_mesh(split, reference=ref)["verdict"] == "PASS"
+    hole = score.Mesh(ref.vertices, ref.faces[:5] + ref.faces[6:])
+    assert score.score_mesh(hole, reference=ref)["verdict"] == "INVALID_CONNECTIVITY"
+    shifted = score.Mesh(ref.vertices + [0.3, 0, 0], ref.faces)
+    r = score.score_mesh(shifted, reference=ref, surface_z=lambda x, y: 0)
+    assert r["verdict"] == "INVALID_CONNECTIVITY"

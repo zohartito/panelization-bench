@@ -12,17 +12,11 @@ It is **not**, primarily, a test of the model's geometric reasoning. The
 `ezdxf-control` lane (a headless DXF library, no application) isolates that, and any
 capable model reaches the same geometric wall in it.
 
-What it tests is **whether the engine's ecosystem puts the right tool within the
-agent's reach.** Panelizing this surface to tolerance requires a solver-class
-capability — a Kangaroo/ShapeOp-grade planar-quad optimizer, ideally with
-conjugate-aligned remeshing. Rhino/Grasshopper has Kangaroo; a bare scripting lane
-does not, and no amount of model cleverness recovers it. That is a far more useful
-answer to "which app is best to drive with an agent" than "Rhino is better at NURBS."
-
-**Product implication:** if ecosystem tooling is the discriminator, then the MCP gap
-is **not transport — it is exposing solver-class capability to agents.** An MCP server
-that hands an agent optimization (Kangaroo/ShapeOp-grade) is worth far more than one
-that wraps a few more CRUD tools.
+The benchmark compares the geometry and tooling an agent can reach through each
+engine. Global PQ optimizers (for example Kangaroo/ShapeOp) are candidate tools,
+but the shipped experiments do not establish that a particular optimizer or
+remeshing method is necessary. A PASS reports the scorer's checks, not the
+algorithm used or a proof of fabrication readiness.
 
 ## The task
 
@@ -68,8 +62,8 @@ benign for panelization**, not an umbilic.
 
 ## The trilemma (the load-bearing finding)
 
-A panelization must satisfy three independent properties, and on this surface **any two
-are reachable but all three at once are not**, without a genuine global PQ optimizer.
+A panelization must satisfy planarity, quality and coverage together. The examples
+below illustrate tradeoffs; they do not prove an optimizer is necessary or sufficient.
 Measured corners (all reproducible from `reference/build_reference_solution.py` and the
 probes):
 
@@ -93,10 +87,8 @@ Reading of the table:
 - An arbitrary conjugate net *is* planar over vertices spanning the footprint, but on
   this surface it **collapses/bunches** (fails coverage), so "planar" alone is trivially
   reachable and worthless.
-- Getting **all three** — planar, buildable, and covering the rectangular footprint at
-  ~1.5 m — needs a global PQ optimizer (guided projection / Kangaroo, typically with
-  conjugate-aligned **remeshing**, not the fixed UV connectivity). **That is the skill
-  the benchmark measures, and it maps directly to which engine's ecosystem has the tool.**
+- Getting all three at the requested module and boundary remains a target for
+  comparison, not a conclusion established by these examples.
 
 **Reference artifacts** (in `reference/`, NEITHER is a scoring target — scoring never
 rewards similarity to them):
@@ -137,6 +129,14 @@ problem, so four independent constraints are enforced, each recorded with its nu
 - **OFF-SURFACE** — exact analytic vertical deviation `|z_v − f(x_v,y_v)|` (no
   triangulation noise floor), guarded against non-height-field / folded meshes (kills
   the fold that produces perfectly-planar-but-not-the-building geometry).
+
+With a reference, the mesh must also form one connected manifold canopy with
+matching Euler characteristic. Per-panel vertex copies are welded on a 1 µm
+coordinate grid; open interior seams, holes and disconnected panels fail
+`INVALID_CONNECTIVITY`. Boundary vertices and edge midpoints must match the
+reference boundary in plan in both directions within 0.25 m (the off-surface
+allowance). Topology par is computed from the reference's corners **and** Euler
+characteristic, never from the submission's component count.
 
 Every face must be a quad: any triangles trigger `DODGE_TRIANGULATED`; other
 non-quad panels trigger `NON_QUAD_PANELS`. Mixed-face meshes cannot pass.

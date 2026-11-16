@@ -19,7 +19,10 @@ It is provided two equivalent ways — use whichever suits your engine:
 ## What to produce
 
 1. **Panelize the whole surface into quadrilateral panels at roughly a 1.5 m module.**
-   Quads, not triangles. Cover the entire surface.
+   Quads, not triangles. Cover the entire surface as one connected manifold mesh.
+   Adjacent panels must share complete edges (coincident vertex copies are allowed;
+   scoring welds on a 1 µm grid). No open interior seams or holes. Match the
+   rectangular boundary in plan within 0.25 m.
 2. **Every panel must be planar to within 5 mm** — i.e. its four corners must lie
    within 5 mm of a common plane. This is the binding constraint.
 3. **Export the panelized geometry** to a neutral format — `.obj`, `.ply`, `.dxf`,

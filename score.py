@@ -328,7 +328,7 @@ def domain_corners(V: np.ndarray, faces: list[list[int]]) -> list[tuple]:
 
 
 def topology_score(V: np.ndarray, faces: list[list[int]],
-                   domain: list[tuple] | None = None) -> dict:
+                   domain: list[tuple] | None = None, domain_par: int | None = None) -> dict:
     """Vertex irregularity against par, its discrete Gauss-Bonnet lower bound.
 
     Interior vertices want degree 4, boundary vertices 3, and each domain corner
@@ -359,6 +359,8 @@ def topology_score(V: np.ndarray, faces: list[list[int]],
     n_ties = sum(len(wants[v]) - 1 for v in boundary)
     chi = len(corners) - len(edge_uses) + n_faces
     par = min(abs(corner_excess + 4 * chi + t) for t in range(n_ties + 1))
+    if domain_par is not None:
+        par = domain_par
     vertex_score = sum(defect.values())
     return {
         "par": par,
@@ -369,6 +371,61 @@ def topology_score(V: np.ndarray, faces: list[list[int]],
         "euler_characteristic": chi,
         "note": "graded axis, not a gate; par is a strict bound only for all-quad meshes",
     }
+
+
+
+def connectivity_check(V, faces, RV, ref_faces, boundary_tol_m):
+    """Require a single manifold canopy with the reference topology and boundary.
+
+    Coincident per-panel exports are welded on the same 1 micrometre coordinate
+    grid used by topology_score. Boundary distances are measured in plan.
+    """
+    def graph(vertices, panels):
+        corners, edges, _, pos, boundary, count = _mesh_graph(vertices, panels)
+        adjacent = defaultdict(set)
+        boundary_degree = defaultdict(int)
+        for (a, b), uses in edges.items():
+            adjacent[a].add(b)
+            adjacent[b].add(a)
+            if uses == 1:
+                boundary_degree[a] += 1
+                boundary_degree[b] += 1
+        unseen = set(corners)
+        components = 0
+        while unseen:
+            components += 1
+            pending = [unseen.pop()]
+            while pending:
+                for other in adjacent[pending.pop()] & unseen:
+                    unseen.remove(other)
+                    pending.append(other)
+        segments = np.array([[pos[a][:2], pos[b][:2]] for (a, b), n in edges.items()
+                             if n == 1]).reshape(-1, 2, 2)
+        manifold = all(n <= 2 for n in edges.values()) and all(
+            n == 2 for n in boundary_degree.values())
+        return components, len(corners) - len(edges) + count, manifold, segments
+
+    def distance(source, target):
+        if not len(source) or not len(target):
+            return float("inf")
+        points = np.concatenate([source[:, 0], source.mean(axis=1)])
+        a, b = target[:, 0], target[:, 1]
+        ab = b - a
+        denominator = np.maximum((ab * ab).sum(1), 1e-30)
+        distances = []
+        for point in points:
+            t = np.clip(((point - a) * ab).sum(1) / denominator, 0, 1)
+            distances.append(np.linalg.norm(point - (a + t[:, None] * ab), axis=1).min())
+        return float(max(distances))
+
+    components, chi, manifold, boundary = graph(V, faces)
+    _, ref_chi, _, ref_boundary = graph(RV, ref_faces)
+    gap = max(distance(boundary, ref_boundary), distance(ref_boundary, boundary))
+    return {"pass": components == 1 and manifold and chi == ref_chi and gap <= boundary_tol_m,
+            "components": components, "manifold": manifold,
+            "euler_characteristic": chi, "reference_euler_characteristic": ref_chi,
+            "boundary_gap_m": gap, "boundary_tolerance_m": boundary_tol_m,
+            "weld_grid_m": 1e-6}
 
 
 def _closest_on_triangles(p: np.ndarray, a: np.ndarray, b: np.ndarray,
@@ -508,7 +565,7 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
     bbox_min, bbox_max = V.min(0), V.max(0)
 
     # --- off-surface (analytic height field if available; exact, no noise) ---
-    off_surface = coverage = domain = None
+    off_surface = coverage = domain = domain_par = connectivity = None
     if surface_z is not None:
         off_surface = off_surface_analytic(V, surface_z)
     # --- coverage needs the reference mesh; also fallback off-surface ---
@@ -519,6 +576,9 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
             [triangulate(f, RV) for f in reference.faces if len(f) >= 3]
         )
         domain = domain_corners(RV, reference.faces)
+        domain_par = topology_score(RV, reference.faces)["par"]
+        connectivity = connectivity_check(V, mesh.faces, RV, reference.faces,
+                                           thr.off_surface_max_mm / 1000.0)
         ref_area = float(sum(0.5 * np.linalg.norm(np.cross(t[1] - t[0], t[2] - t[0]))
                              for t in ref_tris))
         if off_surface is None:  # no analytic surface -> mesh distance (noisy)
@@ -571,7 +631,8 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
             "degenerate_panels": n_degen,
             "note": "recorded, graded axis -- not a hard gate (see score.py header)",
         },
-        "topology": topology_score(V, mesh.faces, domain),
+        "topology": topology_score(V, mesh.faces, domain, domain_par),
+        "connectivity": connectivity,
         "off_surface_mm": off_surface,
         "coverage": coverage,
         "bbox_m": {"min": bbox_min.tolist(), "max": bbox_max.tolist(),
@@ -595,7 +656,7 @@ def _trilemma_corner(r: dict) -> str:
     if cov is None:
         conforming = None
     else:
-        conforming = cov["area_ratio"] >= 0.85 and cov["max_gap_m"] <= 2.0
+        conforming = r["checks"]["coverage"]["pass"] and r["checks"]["connectivity"]["pass"]
     if conforming is None:
         return "UNKNOWN_NO_REFERENCE"
     got = [planar, quality, conforming]
@@ -651,6 +712,8 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
             "max_mm": r["off_surface_mm"]["max_mm"],
             "threshold_mm": thr.off_surface_max_mm,
         }
+    if r["connectivity"] is not None:
+        checks["connectivity"] = r["connectivity"]
     checks["degeneracy"] = {
         "pass": r["quality"]["degenerate_panels"] <= thr.degenerate_max_frac * max(
             r["panel_count"], 1),
@@ -673,6 +736,7 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
         ("coverage", "INCOMPLETE_COVERAGE"),
         ("module", "MODULE_VIOLATION"),
         ("off_surface", "OFF_SURFACE"),
+        ("connectivity", "INVALID_CONNECTIVITY"),
         ("degeneracy", "DEGENERATE_PANELS"),
         ("planarity", "PLANARITY_FAIL"),
     ]
