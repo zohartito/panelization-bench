@@ -305,7 +305,8 @@ For args (e.g. `/runscript`), point `/TR` at a small `.cmd` launcher instead of 
 
 ## Helper scripts written this session (`pc/scripts/`)
 - `pc_stub_listener.py` — loopback TCP stub proving the tunnel with real bytes (fed to the
-  PC via `ssh windows-host.example "python -" < pc_stub_listener.py`).
+  PC via `ssh windows-host.example "python -" < pc_stub_listener.py`). Its response
+  `machine` field uses the placeholder `windows-host.example`.
 - `rhino_framed_client.py` — 0.3.2 framed-protocol client; run through the tunnel once
   `mcpstart` is active to pull real Rhino data (`get_document_info`).
 - `ezdxf_quad_smoke.py` — headless planar-quad DXF proof (the `ezdxf-headless` control lane,

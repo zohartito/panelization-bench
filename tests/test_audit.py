@@ -1,6 +1,8 @@
 """Regression probes for the confirmed public-repository audit findings."""
 
+import hashlib
 from pathlib import Path
+import subprocess
 import sys
 
 import numpy as np
@@ -295,6 +297,23 @@ def test_pzb32_remote_examples_use_placeholders():
     assert generic_hosts, "Tunnel examples must use a generic hostname"
     assert "Hostnames and account names below are placeholders" in doc
     assert "there is one:" not in doc
+
+
+def test_pzb32_tracked_tree_has_no_private_hostname():
+    # Keep only a fingerprint; neither fixtures nor failures may disclose the name.
+    fingerprint = "49e7bdf0d9a6603491bdffc40adcc8f94eea9630428db0981599fdb1b7a79ba1"
+    width = 10
+    paths = subprocess.check_output(
+        ["git", "ls-files", "-z"], cwd=ROOT, text=True).split("\0")
+    leaked_paths = []
+    for path in filter(None, paths):
+        data = (ROOT / path).read_bytes().lower()
+        if any(hashlib.sha256(data[i:i + width]).hexdigest() == fingerprint
+               for i in range(len(data) - width + 1)):
+            leaked_paths.append(path)
+    if leaked_paths:
+        pytest.fail("Private workstation identifier in tracked files: "
+                    + ", ".join(leaked_paths), pytrace=False)
 
 
 def test_pzb05_plugin_name_is_not_a_version(tmp_path, monkeypatch):
