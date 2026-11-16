@@ -278,3 +278,13 @@ def test_pzb32_remote_examples_use_placeholders():
     assert generic_hosts, "Tunnel examples must use a generic hostname"
     assert "Hostnames and account names below are placeholders" in doc
     assert "there is one:" not in doc
+
+
+def test_pzb05_plugin_name_is_not_a_version(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    base = tmp_path / "Library/Application Support/McNeel/Rhinoceros/packages/8.0"
+    (base / "rhinomcp").mkdir(parents=True)
+    monkeypatch.setattr(runner, "_app_version", lambda path: "1.0")
+    stack, warnings = runner.probe_stack("rhino-community", "test-model")
+    assert "unknown" in stack["plugin_or_backend"].lower()
+    assert any("stack.plugin_or_backend" in w for w in warnings)

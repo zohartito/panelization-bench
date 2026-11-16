@@ -219,13 +219,9 @@ def _app_version(app_path: Path) -> str:
 
 
 def _rhino_plugin_version() -> str:
-    base = Path.home() / ("Library/Application Support/McNeel/Rhinoceros/"
-                          "packages/8.0")
-    if not base.exists():
-        return "unknown"
-    hits = sorted(p.name for p in base.iterdir()
-                  if p.is_dir() and "rhinomcp" in p.name.lower())
-    return hits[-1] if hits else "unknown"
+    # A package-directory name identifies a plugin, not its loaded version.
+    # No authoritative runtime version is available to this local-only probe.
+    return "unknown"
 
 
 def probe_stack(lane: str, model: str) -> tuple[dict, list[str]]:
