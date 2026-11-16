@@ -127,7 +127,7 @@ recorded but is a **graded axis, not a hard gate** — full-task feasibility at 
 (`trilemma_corner`), so a sophisticated 2×2 m principal patch is distinguishable from
 an agent that panelized a random tenth of the surface and quit.
 
-Units are stated explicitly (`--units`, or `auto` with a loud warning) — a scorer that
+The scorer CLI requires `--units` (use `auto` to guess with a loud warning) — a scorer that
 silently compares mm to m is worthless. `score.py` is covered by 16 exact-answer tests
 (a saddle quad reads its analytic deviation `h` exactly; a tilted planar quad reads 0,
 proving best-fit-plane SVD; the unit trap; point-to-triangle by hand; every cheat

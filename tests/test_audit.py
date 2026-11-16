@@ -170,3 +170,12 @@ def test_pzb04_ply_named_coordinates(tmp_path, properties, rows):
     mesh = score.load_mesh(path)
     np.testing.assert_array_equal(mesh.vertices, [[0, 0, 5], [1, 0, 6], [1, 1, 7], [0, 1, 8]])
     assert mesh.faces == [[0, 1, 2, 3]]
+
+
+def test_pzb08_cli_requires_units(tmp_path, capsys):
+    path = tmp_path / "mesh.obj"
+    path.write_text("v 0 0 0\nv 1500 0 0\nv 1500 1500 0\nv 0 1500 0\nf 1 2 3 4\n")
+    with pytest.raises(SystemExit) as exc:
+        score.main([str(path)])
+    assert exc.value.code == 2
+    assert "--units" in capsys.readouterr().err

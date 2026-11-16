@@ -845,7 +845,7 @@ def load_surface_z(path: Path):
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Neutral planar-quad geometry scorer.")
     ap.add_argument("mesh", type=Path)
-    ap.add_argument("--units", default="m", help="m|mm|cm|in|ft|auto")
+    ap.add_argument("--units", required=True, help="m|mm|cm|in|ft|auto")
     ap.add_argument("--reference", type=Path, default=None)
     ap.add_argument("--ref-units", default="m")
     ap.add_argument("--tol-mm", type=float, default=5.0)
