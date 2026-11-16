@@ -45,9 +45,11 @@ apply to it; that zero-friction is the whole point of a control (see §4).
 ## Transport principle (all socket engines)
 
 Every app-side plugin here opens a **loopback-bound** TCP socket with **no authentication**
-(arbitrary code execution over the wire — see `cad-cockpit/docs/research/mcp-security-posture.md`).
+(commands can execute arbitrary code in the app). Treat access as code-execution
+permission: use trusted clients and keep the listener on loopback.
 The correct way to reach these from the Mac is an **SSH tunnel over Tailscale**, never
-rebinding the socket to `0.0.0.0`. This matches `cad-cockpit/docs/product/architecture.md`.
+rebinding the socket to `0.0.0.0`. Authenticate access at SSH; do not expose the
+unauthenticated app socket through a public listener or port-forwarding rule.
 The Python MCP server runs on the Mac and connects to `127.0.0.1:<localport>`; the tunnel
 carries that to the PC's loopback socket. Loopback on both ends, no auth exposed to the LAN.
 
@@ -277,8 +279,9 @@ mesh/DXF panelization output is limited; note it, don't over-invest.)
 ## Reusable: launching a GUI app over SSH on the PC
 
 Plain SSH launch of a GUI app lands in the wrong session / vanishes. Use an **interactive
-scheduled task** into the active console session (pattern from
-`cad-cockpit/docs/workflows/revit-mcp-over-ssh.md`). Requires a logged-in console session
+scheduled task** into the active console session. Run the commands below as the
+Windows user who owns that session: `/IT` selects interactive execution; create
+the task, start it, then delete the temporary task definition. This requires a logged-in console session
 (there is one: `zohar_4ta16fp`). Always delete the temp task after.
 ```bat
 schtasks /Create /TN BenchLaunchRhino8 /TR "\"C:\Program Files\Rhino 8\System\Rhino.exe\"" /SC ONCE /ST 23:59 /IT /F
