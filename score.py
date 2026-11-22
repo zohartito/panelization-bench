@@ -20,9 +20,9 @@ its numbers (not just pass/fail):
               mesh that has drifted off the building (what a folding optimizer
               produces) is not a solution. Kills the fold / flatten cheats.
 
-Faces are classified by vertex count: quad (4) scored; triangle (3) planarity is
-trivially 0 -- any triangle has DODGED the planar-quad problem. Any non-quad
-face prevents a pass; ngon (>4) planarity is still measured for diagnostics.
+Every panel must be a quad (4 vertices). Any triangle (3) or ngon (>4) rejects
+the submission: triangle planarity is trivially 0, and ngons cannot stand in for
+failing quads. Ngon planarity is still measured for diagnostics.
 
 QUALITY (min interior angle, aspect ratio, degenerate-panel count) is measured and
 recorded but NOT a hard gate by default: a facade of planar slivers is not
@@ -670,7 +670,8 @@ def _trilemma_corner(r: dict) -> str:
     technique and hit the known boundary problem' from 'gave up'. Maps every run
     to the three measured reference corners."""
     p = r["planarity_mm"]
-    planar = r["checks"]["all_quads"]["pass"] and p["quads_failing_tol"] == 0
+    planar = (r["checks"]["not_triangulated"]["pass"] and r["checks"]["not_ngons"]["pass"]
+              and p["quads_failing_tol"] == 0)
     quality = r["quality"]["min_angle_deg_worst"] >= 20.0 and r["face_breakdown"]["quads"] > 0
     cov = r["coverage"]
     if cov is None:
@@ -711,9 +712,9 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
         "pass": fb["triangles"] == 0,
         "quads": fb["quads"], "triangles": fb["triangles"],
     }
-    checks["all_quads"] = {
-        "pass": fb["quads"] > 0 and fb["quads"] == r["panel_count"],
-        **fb,
+    checks["not_ngons"] = {
+        "pass": fb["ngons"] == 0,
+        "quads": fb["quads"], "ngons": fb["ngons"],
     }
     if r["coverage"] is not None:
         checks["coverage"] = {
@@ -749,11 +750,11 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
 
     # Precedence: fundamental problems first. Detected vertex-pair folds
     # headline; this heuristic does not certify a height field. Then
-    # triangulation (the task was planar QUADS), coverage, module, and so on.
+    # non-quad panels (the task was planar QUADS), coverage, module, and so on.
     order = [
         ("height_field", "NON_HEIGHTFIELD"),
         ("not_triangulated", "DODGE_TRIANGULATED"),
-        ("all_quads", "NON_QUAD_PANELS"),
+        ("not_ngons", "DODGE_NGONS"),
         ("coverage", "INCOMPLETE_COVERAGE"),
         ("module", "MODULE_VIOLATION"),
         ("off_surface", "OFF_SURFACE"),

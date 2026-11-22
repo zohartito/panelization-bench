@@ -121,8 +121,11 @@ reference boundary in plan in both directions within 0.25 m (the off-surface
 allowance). Topology par is computed from the reference's corners **and** Euler
 characteristic, never from the submission's component count.
 
-Every face must be a quad: any triangles trigger `DODGE_TRIANGULATED`; other
-non-quad panels trigger `NON_QUAD_PANELS`. Mixed-face meshes cannot pass.
+Every submitted panel must be a quad: even one triangle is flagged
+`DODGE_TRIANGULATED`, and any n-gon is flagged `DODGE_NGONS` (the task was planar
+*quads*). N-gon planarity remains diagnostic, not a way to hide failing quads.
+These checks precede coverage, module and planarity; the height-field guard stays
+first. A rejected export that claims success becomes `FALSE_SUCCESS` in the harness.
 **Quality** (min interior angle, aspect ratio, degenerate-panel count) is measured and
 recorded but is a **graded axis, not a hard gate** — full-task feasibility at buildable quality is not established; egregious collapse still trips
 `DEGENERATE_PANELS`. Every run is classified by which trilemma corner it landed on
