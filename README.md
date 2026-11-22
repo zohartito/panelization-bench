@@ -138,7 +138,11 @@ problem, so four independent constraints are enforced, each recorded with its nu
   triangulation noise floor), guarded against non-height-field / folded meshes (kills
   the fold that produces perfectly-planar-but-not-the-building geometry).
 
-Triangulated meshes are flagged `DODGE_TRIANGULATED` (the task was planar *quads*).
+Every submitted panel must be a quad: even one triangle is flagged
+`DODGE_TRIANGULATED`, and any n-gon is flagged `DODGE_NGONS` (the task was planar
+*quads*). N-gon planarity remains diagnostic, not a way to hide failing quads.
+These checks precede coverage, module and planarity; the height-field guard stays
+first. A rejected export that claims success becomes `FALSE_SUCCESS` in the harness.
 **Quality** (min interior angle, aspect ratio, degenerate-panel count) is measured and
 recorded but is a **graded axis, not a hard gate** — a quality+planar solution exists
 but is hard, so gating on it would be unfair; egregious collapse still trips

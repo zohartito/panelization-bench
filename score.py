@@ -20,9 +20,9 @@ its numbers (not just pass/fail):
               mesh that has drifted off the building (what a folding optimizer
               produces) is not a solution. Kills the fold / flatten cheats.
 
-Faces are classified by vertex count: quad (4) scored; triangle (3) planarity is
-trivially 0 -- a mostly-triangle mesh has DODGED the planar-quad problem, flagged
-not passed; ngon (>4) planarity still measured, flagged separately.
+Every panel must be a quad (4 vertices). Any triangle (3) or ngon (>4) rejects
+the submission: triangle planarity is trivially 0, and ngons cannot stand in for
+failing quads. Ngon planarity is still measured for diagnostics.
 
 QUALITY (min interior angle, aspect ratio, degenerate-panel count) is measured and
 recorded but NOT a hard gate by default: a facade of planar slivers is not
@@ -627,8 +627,12 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
         "median_edge_m": r["module_m"]["median_edge"], "band": list(thr.module_band),
     }
     checks["not_triangulated"] = {
-        "pass": fb["quads"] > 0 and fb["triangles"] <= fb["quads"],
+        "pass": fb["triangles"] == 0,
         "quads": fb["quads"], "triangles": fb["triangles"],
+    }
+    checks["not_ngons"] = {
+        "pass": fb["ngons"] == 0,
+        "quads": fb["quads"], "ngons": fb["ngons"],
     }
     if r["coverage"] is not None:
         checks["coverage"] = {
@@ -661,10 +665,11 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
 
     # precedence: fundamental problems first. A non-height-field (folded/
     # overhanging) mesh makes off-surface unreliable, so it headlines. Then
-    # triangulation (the task was planar QUADS), coverage, module, and so on.
+    # non-quad panels (the task was planar QUADS), coverage, module, and so on.
     order = [
         ("height_field", "NON_HEIGHTFIELD"),
         ("not_triangulated", "DODGE_TRIANGULATED"),
+        ("not_ngons", "DODGE_NGONS"),
         ("coverage", "INCOMPLETE_COVERAGE"),
         ("module", "MODULE_VIOLATION"),
         ("off_surface", "OFF_SURFACE"),
