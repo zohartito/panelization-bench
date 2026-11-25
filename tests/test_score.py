@@ -261,6 +261,36 @@ def test_clean_pass_on_faithful_panelization():
     assert r["verdict"] == "PASS"
 
 
+def _soundness_probe(kind):
+    verts, faces = _grid(n=3, size=4.0)
+    if kind == "duplicate":
+        faces.append(list(faces[4]))          # centre panel exported twice
+    elif kind == "bowtie":
+        a, b, c, d = faces[4]
+        faces[4] = [a, b, d, c]               # planar, same corners, self-crossing
+    return mesh(verts, faces)
+
+
+@pytest.mark.parametrize("kind,verdict", [
+    ("clean", "PASS"),
+    ("duplicate", "OVERLAPPING_PANELS"),
+    ("bowtie", "OVERLAPPING_PANELS"),
+])
+def test_overlapping_panels_are_not_a_pass(tmp_path, kind, verdict):
+    # Both cheats are planar, on-surface, in module and within the coverage band
+    # (a duplicated panel reads area ratio 10/9), so only soundness catches them.
+    path = _write_obj(tmp_path / "panels.obj", _soundness_probe(kind))
+    ref = _flat_reference(size=4.0)
+    r = score.score_mesh(score.load_mesh(path), units="m", reference=ref,
+                         surface_z=lambda x, y: 0.0)
+    assert r["checks"]["coverage"]["pass"]
+    assert r["verdict"] == verdict
+    s = r["checks"]["sound"]
+    assert (s["duplicate_panels"], s["bowtie_panels"]) == {
+        "clean": (0, 0), "duplicate": (1, 0), "bowtie": (0, 1)}[kind]
+    assert (s["non_manifold_edges"] > 0) is (kind == "duplicate")
+
+
 def test_sliver_gaming_is_not_a_clean_pass(tmp_path):
     """Planar + covering + correct module, but achieved by slivering.
 

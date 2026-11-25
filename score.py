@@ -20,6 +20,10 @@ its numbers (not just pass/fail):
               mesh that has drifted off the building (what a folding optimizer
               produces) is not a solution. Kills the fold / flatten cheats.
 
+SOUNDNESS (OVERLAPPING_PANELS): no duplicated panel, no bow-tie (self-crossing)
+quad, no edge shared by more than two panels. Stacked panels would otherwise
+pass coverage, which only measures area and gaps.
+
 Every panel must be a quad (4 vertices). Any triangle (3) or ngon (>4) rejects
 the submission: triangle planarity is trivially 0, and ngons cannot stand in for
 failing quads. Ngon planarity is still measured for diagnostics.
@@ -282,6 +286,24 @@ def quad_aspect(corners: np.ndarray) -> float:
     return float(max(e) / max(min(e), 1e-12))
 
 
+def is_bowtie(corners: np.ndarray) -> bool:
+    """A self-intersecting quad: on its best-fit plane, one pair of opposite
+    edges properly crosses. Such a panel folds through itself and cannot be cut."""
+    if len(corners) != 4:
+        return False
+    centered = corners - corners.mean(axis=0)
+    _, _, vt = np.linalg.svd(centered, full_matrices=False)
+    p = centered @ vt[:2].T                       # (4,2) on the best-fit plane
+
+    def side(a, b, c):
+        return np.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]))
+
+    def cross(a, b, c, d):
+        return side(a, b, c) * side(a, b, d) < 0 and side(c, d, a) * side(c, d, b) < 0
+
+    return bool(cross(p[0], p[1], p[2], p[3]) or cross(p[1], p[2], p[3], p[0]))
+
+
 def edge_lengths(corners: np.ndarray) -> list[float]:
     return [float(np.linalg.norm(corners[(k + 1) % len(corners)] - corners[k]))
             for k in range(len(corners))]
@@ -389,6 +411,7 @@ def topology_score(V: np.ndarray, faces: list[list[int]],
         "excess": vertex_score - par,
         "irregular_vertices": sum(1 for d in defect.values() if d),
         "euler_characteristic": chi,
+        "non_manifold_edges": sum(1 for uses in edge_uses.values() if uses > 2),
         "note": "graded axis, not a gate; par is a strict bound only for all-quad meshes",
     }
 
@@ -552,6 +575,7 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
     all_edges: list[float] = []
     min_angles, aspects, areas = [], [], []
     panel_tris = []                       # triangulation of ALL panels (coverage)
+    panels = []                           # corners of every scored panel
     for face in mesh.faces:
         n = len(face)
         if n < 3:
@@ -571,6 +595,7 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
             min_angles.append(quad_min_angle_deg(cor))
             aspects.append(quad_aspect(cor))
             areas.append(face_area(cor))
+            panels.append(cor)
     panel_tris = np.concatenate(panel_tris) if panel_tris else np.zeros((0, 3, 3))
 
     qd = np.array(quad_dev) * 1000.0
@@ -620,6 +645,15 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
         }
 
     n_degen = int((ar < thr.degenerate_area_frac * med_area).sum()) if med_area else 0
+    # Soundness: a buildable panel set must not overlap itself. Degenerate panels
+    # are already counted above; their collapsed corners would read as bow-ties
+    # or coincident centroids, so they are skipped here.
+    sound_panels = [c for c, a in zip(panels, areas)
+                    if a >= thr.degenerate_area_frac * med_area]
+    centroids = np.round(np.array([c.mean(0) for c in sound_panels]) / 1e-3)
+    n_dup = len(sound_panels) - (len(np.unique(centroids, axis=0))
+                                 if sound_panels else 0)
+    n_bowtie = sum(1 for c in sound_panels if is_bowtie(c))
 
     result = {
         "units_assumed": unit_label,
@@ -653,6 +687,7 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
         },
         "topology": topology_score(V, mesh.faces, domain, domain_par),
         "connectivity": connectivity,
+        "soundness": {"duplicate_panels": n_dup, "bowtie_panels": n_bowtie},
         "off_surface_mm": off_surface,
         "coverage": coverage,
         "bbox_m": {"min": bbox_min.tolist(), "max": bbox_max.tolist(),
@@ -716,6 +751,13 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
         "pass": fb["ngons"] == 0,
         "quads": fb["quads"], "ngons": fb["ngons"],
     }
+    s = r["soundness"]
+    nm = r["topology"]["non_manifold_edges"]
+    checks["sound"] = {
+        "pass": s["duplicate_panels"] == 0 and s["bowtie_panels"] == 0 and nm == 0,
+        "duplicate_panels": s["duplicate_panels"],
+        "bowtie_panels": s["bowtie_panels"], "non_manifold_edges": nm,
+    }
     if r["coverage"] is not None:
         checks["coverage"] = {
             "pass": (thr.coverage_area_min <= r["coverage"]["area_ratio"] <= thr.coverage_area_max
@@ -750,11 +792,13 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
 
     # Precedence: fundamental problems first. Detected vertex-pair folds
     # headline; this heuristic does not certify a height field. Then
-    # non-quad panels (the task was planar QUADS), coverage, module, and so on.
+    # non-quad panels (the task was planar QUADS), overlapping / self-crossing
+    # panels (area counted twice is not coverage), coverage, module, and so on.
     order = [
         ("height_field", "NON_HEIGHTFIELD"),
         ("not_triangulated", "DODGE_TRIANGULATED"),
         ("not_ngons", "DODGE_NGONS"),
+        ("sound", "OVERLAPPING_PANELS"),
         ("coverage", "INCOMPLETE_COVERAGE"),
         ("module", "MODULE_VIOLATION"),
         ("off_surface", "OFF_SURFACE"),
@@ -823,6 +867,10 @@ def human_summary(r: dict) -> str:
                f"median {q['min_angle_deg_median']:.1f} | aspect median "
                f"{q['aspect_median']:.2f} worst {q['aspect_worst']:.1f} | "
                f"degenerate {q['degenerate_panels']}")
+    s = r["soundness"]
+    out.append(f"  soundness: duplicate panels {s['duplicate_panels']} | bow-tie "
+               f"panels {s['bowtie_panels']} | non-manifold edges "
+               f"{r['topology']['non_manifold_edges']}")
     t = r["topology"]
     out.append(f"  topology: {t['irregular_vertices']} irregular vertices | vertex "
                f"score {t['vertex_score']} vs par {t['par']} -> excess {t['excess']}")

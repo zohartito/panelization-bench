@@ -126,6 +126,15 @@ Every submitted panel must be a quad: even one triangle is flagged
 *quads*). N-gon planarity remains diagnostic, not a way to hide failing quads.
 These checks precede coverage, module and planarity; the height-field guard stays
 first. A rejected export that claims success becomes `FALSE_SUCCESS` in the harness.
+
+Panels must also be **sound**. Coverage only measures area and gaps, so stacked or
+self-crossing panels could pass it. A duplicated panel (same centroid to 1 mm), a bow-tie
+quad (opposite edges cross on its best-fit plane), or an edge shared by more than two
+panels is flagged `OVERLAPPING_PANELS`. This check runs after the quad checks and before
+coverage. Degenerate panels are skipped here because they are already counted as
+slivers. Coverage now also caps the area ratio at 1.25. The conjugate-net gold
+artifact is genuinely folded: 212 of its 351 panels are non-degenerate bow-ties. It now headlines
+`OVERLAPPING_PANELS` and still fails coverage.
 **Quality** (min interior angle, aspect ratio, degenerate-panel count) is measured and
 recorded but is a **graded axis, not a hard gate** — full-task feasibility at buildable quality is not established; egregious collapse still trips
 `DEGENERATE_PANELS`. Every run is classified by which trilemma corner it landed on
