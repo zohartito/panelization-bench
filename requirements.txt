@@ -1,6 +1,5 @@
-# Pinned so the benchmark cannot silently change its own results over time.
-# Principle (mirrors the per-run `stack` block, one level down): pin everything
-# you are NOT testing. A library bump must be a deliberate, visible change.
+# Direct dependency pins only; transitive dependencies can drift.
+# Verified hashed install: requirements-macos-arm64-py311.lock.
 numpy==2.0.2
 scipy==1.14.1
 pytest==9.0.2

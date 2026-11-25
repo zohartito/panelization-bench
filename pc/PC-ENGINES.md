@@ -1,7 +1,8 @@
 # PC Engines — Panelization Bench Eligibility
 
-Wiring the Windows PC (`desktop-zt`, reached from the Mac over Tailscale/SSH) into the
-planar-quad facade panelization bake-off. Owner: `pc-wirer`. Last updated 2026-08-15.
+Example configuration for a Windows workstation (`windows-host.example`) reached
+from a client over SSH. Hostnames and account names below are placeholders.
+Historical engine observations: 2026-08-15.
 
 Benchmark task recap: a doubly-curved 40×20 m canopy panelized into ~1.5 m quads, every
 panel planar within 5 mm, scored externally on **exported geometry**. An engine is
@@ -45,9 +46,11 @@ apply to it; that zero-friction is the whole point of a control (see §4).
 ## Transport principle (all socket engines)
 
 Every app-side plugin here opens a **loopback-bound** TCP socket with **no authentication**
-(arbitrary code execution over the wire — see `cad-cockpit/docs/research/mcp-security-posture.md`).
+(commands can execute arbitrary code in the app). Treat access as code-execution
+permission: use trusted clients and keep the listener on loopback.
 The correct way to reach these from the Mac is an **SSH tunnel over Tailscale**, never
-rebinding the socket to `0.0.0.0`. This matches `cad-cockpit/docs/product/architecture.md`.
+rebinding the socket to `0.0.0.0`. Authenticate access at SSH; do not expose the
+unauthenticated app socket through a public listener or port-forwarding rule.
 The Python MCP server runs on the Mac and connects to `127.0.0.1:<localport>`; the tunnel
 carries that to the PC's loopback socket. Loopback on both ends, no auth exposed to the LAN.
 
@@ -64,7 +67,7 @@ Mac MCP server ── connects to 127.0.0.1:<localport> ── SSH tunnel ──
 (Mikhael Johanes fork) left untouched — separate fork, not part of the comparison.
 
 **Why the version match matters:** the PC shipped the *legacy* plugin 0.2.1, which uses the
-old **unframed** wire protocol. The current PyPI client (`uvx rhinomcp` → 0.3.2) switched to
+old **unframed** wire protocol. The current PyPI client (`uvx rhinomcp@0.3.2` → 0.3.2) switched to
 **4-byte length-prefixed framing** and actively *rejects* a legacy plugin
 ("plugin predates length-prefixed framing. Update the plugin."). Left unfixed this is a
 **silent failure that looks like "PC Rhino just doesn't work."** More important for the
@@ -72,12 +75,24 @@ bake-off: if the two machines ran different plugin versions you'd be comparing p
 machines (0.3.2 also exposes far more tools, incl. the Grasshopper set). Both machines are
 now 0.3.2 → the machine is the only variable.
 
+**Client installation (from the repository root):** pin the client to the same
+0.3.2 release as the plugin. For the verified CPython 3.11/macOS arm64 client
+environment, install the complete hashed lock into a dedicated venv:
+```bash
+python3.11 -m venv /path/to/rhino-client-venv
+/path/to/rhino-client-venv/bin/python -m pip install --require-hashes -r pc/requirements-rhinomcp-macos-arm64-py311.lock
+```
+`uvx rhinomcp@0.3.2` pins the client release but does not lock its transitive
+packages; use the installed executable below for the hashed environment. The
+lock validates package bytes, not a live app/plugin connection. Other platforms
+need a separately resolved and verified lock.
+
 **Transport (loopback both ends, no 0.0.0.0, no ALLOW_REMOTE):**
 ```bash
 # tunnel: Mac localhost:2999 -> PC localhost:1999  (2999 avoids the Mac's own Rhino on 1999)
-ssh -N -L 2999:127.0.0.1:1999 desktop-zt
+ssh -N -L 2999:127.0.0.1:1999 windows-host.example
 # Mac-side MCP server instance, pointed through the tunnel:
-RHINO_MCP_HOST=127.0.0.1  RHINO_MCP_PORT=2999  uvx rhinomcp
+RHINO_MCP_HOST=127.0.0.1  RHINO_MCP_PORT=2999  /path/to/rhino-client-venv/bin/rhinomcp
 ```
 The client honors `RHINO_MCP_HOST`/`RHINO_MCP_PORT` (defaults 127.0.0.1:1999). No code changes.
 
@@ -102,7 +117,7 @@ runscript can't click. Stated as most-likely, not confirmed (dialog not visually
 1. Open Rhino once. If prompted "…not digitally signed. Load it?", click **Yes** (and set
    the plugin to load, so it doesn't re-ask).
 2. Type `mcpstart`. Socket comes up on `127.0.0.1:1999`.
-3. From then on: tunnel + `RHINO_MCP_PORT=2999 uvx rhinomcp` drives PC Rhino from the Mac,
+3. From then on: tunnel + `RHINO_MCP_PORT=2999 /path/to/rhino-client-venv/bin/rhinomcp` drives PC Rhino from the Mac,
    no further interaction that session. This `mcpstart` step is **identical on the Mac
    Rhino**, so it's fair — PC Rhino is fully eligible.
 
@@ -129,7 +144,7 @@ PC" task, headless-safe for the file portion.
   `IPAddress.Parse "127.0.0.1"` (loopback, verified in source). This is the one to use from
   the Mac:
 ```bash
-ssh -N -L 8765:127.0.0.1:8765 desktop-zt   # then point the client at TCP transport, port 8765
+ssh -N -L 8765:127.0.0.1:8765 windows-host.example   # then point the client at TCP transport, port 8765
 ```
 The pipe-vs-TCP choice is a client transport flag; must select TCP for remote driving.
 
@@ -165,7 +180,7 @@ Rhino (interactive scheduled task) when ready to test.
 **Transport:** TCP socket **`127.0.0.1:5555`**, loopback (plugin defaults `host="127.0.0.1",
 port=5555`; server side reads `C4D_HOST`/`C4D_PORT`).
 ```bash
-ssh -N -L 5555:127.0.0.1:5555 desktop-zt   # then C4D_HOST=127.0.0.1 C4D_PORT=5555 on the server
+ssh -N -L 5555:127.0.0.1:5555 windows-host.example   # then C4D_HOST=127.0.0.1 C4D_PORT=5555 on the server
 ```
 
 **Reachability — worst of the set:** manual plugin copy (`mcp_server_plugin.pyp` → C4D plugin
@@ -265,7 +280,7 @@ mesh/DXF panelization output is limited; note it, don't over-invest.)
 | PC OS | Windows 11 (10.0.26200) |
 | PC Rhino | 8.30.26103.11001 |
 | PC Rhino plugin | rhinomcp **0.3.2** (yak) — matches Mac |
-| Rhino MCP client | `uvx rhinomcp` → 0.3.2 (framed protocol) |
+| Rhino MCP client | `uvx rhinomcp@0.3.2` → 0.3.2 (framed protocol) |
 | Mac host | uv 0.12.5 / managed Python (client host) |
 | PC Python | 3.14.4 + 3.13.14 |
 | 3ds Max | 2026.3 — 3dsmax-mcp bridge `mcp_bridge_2026.gup`; TCP 8765 (loopback) / named pipe |
@@ -277,9 +292,10 @@ mesh/DXF panelization output is limited; note it, don't over-invest.)
 ## Reusable: launching a GUI app over SSH on the PC
 
 Plain SSH launch of a GUI app lands in the wrong session / vanishes. Use an **interactive
-scheduled task** into the active console session (pattern from
-`cad-cockpit/docs/workflows/revit-mcp-over-ssh.md`). Requires a logged-in console session
-(there is one: `zohar_4ta16fp`). Always delete the temp task after.
+scheduled task** into the active console session. Run the commands below as the
+Windows user who owns that session: `/IT` selects interactive execution; create
+the task, start it, then delete the temporary task definition. This requires a logged-in console session
+(use your own `WINDOWS_USER`). Always delete the temp task after.
 ```bat
 schtasks /Create /TN BenchLaunchRhino8 /TR "\"C:\Program Files\Rhino 8\System\Rhino.exe\"" /SC ONCE /ST 23:59 /IT /F
 schtasks /Run    /TN BenchLaunchRhino8
@@ -289,8 +305,11 @@ For args (e.g. `/runscript`), point `/TR` at a small `.cmd` launcher instead of 
 
 ## Helper scripts written this session (`pc/scripts/`)
 - `pc_stub_listener.py` — loopback TCP stub proving the tunnel with real bytes (fed to the
-  PC via `ssh desktop-zt "python -" < pc_stub_listener.py`).
+  PC via `ssh windows-host.example "python -" < pc_stub_listener.py`). Its response
+  `machine` field uses the placeholder `windows-host.example`.
 - `rhino_framed_client.py` — 0.3.2 framed-protocol client; run through the tunnel once
   `mcpstart` is active to pull real Rhino data (`get_document_info`).
 - `ezdxf_quad_smoke.py` — headless planar-quad DXF proof (the `ezdxf-headless` control lane,
-  not AutoCAD the app); run with the `autocad-mcp-pro` venv's python. Writes `panels_smoke.dxf`.
+  not AutoCAD the app); run with the `autocad-mcp-pro` venv's python. Writes
+  `panels_smoke.dxf` in the caller's directory, or use `--output path/to/panels.dxf`
+  (missing parent directories are created).

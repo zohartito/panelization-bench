@@ -1,4 +1,4 @@
-# GOLD conjugate net: PLANAR to machine epsilon + full coverage, but NOT fabricable (slivers). Planarity-existence proof only -- NOT a target.
+# GOLD conjugate net: near-planar after six-decimal export, INCOMPLETE_COVERAGE; NOT fabricable (slivers). Planarity-existence proof only -- NOT a target.
 v -20.000000 -10.000000 2.500000
 v -18.518519 -10.000000 1.929142
 v -17.037037 -10.000000 1.538745

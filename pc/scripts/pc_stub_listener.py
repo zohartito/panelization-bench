@@ -34,7 +34,7 @@ while time.time() < DEADLINE:
             "status": "success",
             "result": {
                 "served_by": "pc_stub_listener",
-                "machine": "desktop-zt",
+                "machine": "windows-host.example",
                 "peer": str(addr),
                 "received_command": req.get("type") or req.get("command"),
                 "note": "tunnel + client env wiring proven with real bytes",

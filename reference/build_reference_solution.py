@@ -1,18 +1,18 @@
 """Build the reference solutions that bound the PLANAR / QUALITY / CONFORMING
-trilemma, and export them for provenance. NEITHER is a scoring target -- scoring
+tradeoffs, and export them for provenance. NEITHER is a scoring target -- scoring
 never rewards similarity to these. They only establish what is achievable.
 
   canopy_gold_planar.obj          -- discrete conjugate (Q-net) over the full
-                                     footprint. Planar to machine epsilon, full
-                                     coverage, ~1.5 m module, but UNBUILDABLE
-                                     (slivers). The planarity-existence proof.
+                                     footprint. Planar in memory, but collapses
+                                     to incomplete coverage and is UNBUILDABLE
+                                     (slivers). Not a whole-canopy solution.
   canopy_gold_principal_patch.obj -- a principal curvature-line net. Planar AND
                                      buildable quality (orthogonal), but only
                                      covers a small patch (curvature lines do not
                                      conform to the rectangular boundary). The
-                                     proof that planar+quality quads EXIST on A.
+                                     example at an approximately 0.08 m module.
 
-Prints the measured numbers used in the README.
+Prints measurements reloaded after six-decimal OBJ export, not in-memory precision.
 """
 
 from __future__ import annotations
@@ -165,21 +165,27 @@ def stats(P: np.ndarray) -> dict:
             "slivers_under_20deg": int((ang < 20).sum()), "quads": len(dev)}
 
 
+def saved_stats(path: Path, shape: tuple) -> dict:
+    vertices = [list(map(float, line.split()[1:4]))
+                for line in path.read_text().splitlines() if line.startswith("v ")]
+    return stats(np.array(vertices).reshape(shape))
+
+
 def main() -> None:
     net = build_conjugate_net()
     write_obj(net, HERE / "canopy_gold_planar.obj",
-              "GOLD conjugate net: PLANAR to machine epsilon + full coverage, but "
+              "GOLD conjugate net: near-planar after six-decimal export, INCOMPLETE_COVERAGE; "
               "NOT fabricable (slivers). Planarity-existence proof only -- NOT a target.")
-    s1 = stats(net)
+    s1 = saved_stats(HERE / "canopy_gold_planar.obj", net.shape)
     patch = build_principal_patch()
     write_obj(patch, HERE / "canopy_gold_principal_patch.obj",
               "Principal curvature-line net: PLANAR + buildable QUALITY, but covers "
               "only a small patch (curvature lines do not conform to the boundary).")
-    s2 = stats(patch)
+    s2 = saved_stats(HERE / "canopy_gold_principal_patch.obj", patch.shape)
     xr = patch[..., 0].max() - patch[..., 0].min()
     yr = patch[..., 1].max() - patch[..., 1].min()
-    print("canopy_gold_planar.obj (conjugate net, CONFORMING corner):")
-    print(f"  planarity max {s1['planarity_mm_max']:.3e} mm (machine epsilon) | "
+    print("canopy_gold_planar.obj (conjugate net, INCOMPLETE_COVERAGE):")
+    print(f"  planarity max {s1['planarity_mm_max']:.3e} mm (saved OBJ) | "
           f"min-angle median {s1['min_angle_median']:.1f} deg worst {s1['min_angle_worst']:.1f} "
           f"| slivers<20deg {s1['slivers_under_20deg']}/{s1['quads']}")
     print("canopy_gold_principal_patch.obj (principal net, QUALITY corner):")
