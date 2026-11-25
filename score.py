@@ -48,6 +48,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import tempfile
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
@@ -65,6 +67,7 @@ class Thresholds:
     module_target_m: float = 1.5
     module_band: tuple[float, float] = (0.9, 2.4)   # allowed median edge length
     coverage_area_min: float = 0.85     # panel area / reference area
+    coverage_area_max: float = 1.15     # symmetric 15% allowance; rejects stacked layers
     coverage_gap_max_m: float = 2.0     # largest surface-sample-to-panel gap
     off_surface_max_mm: float = 250.0   # exported vertex must be this close to surface
     flatten_z_ratio: float = 0.3        # exported z-range < ratio*reference => suspect
@@ -122,21 +125,38 @@ def _load_ply(path: Path) -> Mesh:
         raise ValueError("not an ASCII PLY file")
     n_vert = n_face = header_end = 0
     fmt = ""
+    element = None
+    vertex_properties = []
     for i, ln in enumerate(lines):
         t = ln.split()
         if t and t[0] == "format":
             fmt = t[1]
-        elif len(t) >= 3 and t[:2] == ["element", "vertex"]:
-            n_vert = int(t[2])
-        elif len(t) >= 3 and t[:2] == ["element", "face"]:
-            n_face = int(t[2])
+        elif len(t) >= 3 and t[0] == "element":
+            element = t[1]
+            if element == "vertex":
+                n_vert = int(t[2])
+            elif element == "face":
+                n_face = int(t[2])
+        elif t and t[0] == "property" and element == "vertex":
+            vertex_properties.append((t[-1], t[1] == "list"))
         elif t and t[0] == "end_header":
             header_end = i + 1
             break
     if fmt != "ascii":
         raise ValueError(f"only ASCII PLY supported (got {fmt})")
     body = lines[header_end:]
-    verts = [tuple(map(float, body[i].split()[:3])) for i in range(n_vert)]
+    if not {"x", "y", "z"} <= {name for name, is_list in vertex_properties if not is_list}:
+        raise ValueError("PLY vertices require scalar x, y and z properties")
+    verts = []
+    for row in body[:n_vert]:
+        fields, values, offset = row.split(), {}, 0
+        for name, is_list in vertex_properties:
+            if is_list:
+                offset += 1 + int(fields[offset])
+            else:
+                values[name] = float(fields[offset])
+                offset += 1
+        verts.append(tuple(values[name] for name in ("x", "y", "z")))
     faces = []
     for i in range(n_vert, n_vert + n_face):
         t = list(map(int, body[i].split()))
@@ -328,7 +348,7 @@ def domain_corners(V: np.ndarray, faces: list[list[int]]) -> list[tuple]:
 
 
 def topology_score(V: np.ndarray, faces: list[list[int]],
-                   domain: list[tuple] | None = None) -> dict:
+                   domain: list[tuple] | None = None, domain_par: int | None = None) -> dict:
     """Vertex irregularity against par, its discrete Gauss-Bonnet lower bound.
 
     Interior vertices want degree 4, boundary vertices 3, and each domain corner
@@ -359,6 +379,8 @@ def topology_score(V: np.ndarray, faces: list[list[int]],
     n_ties = sum(len(wants[v]) - 1 for v in boundary)
     chi = len(corners) - len(edge_uses) + n_faces
     par = min(abs(corner_excess + 4 * chi + t) for t in range(n_ties + 1))
+    if domain_par is not None:
+        par = domain_par
     vertex_score = sum(defect.values())
     return {
         "par": par,
@@ -369,6 +391,61 @@ def topology_score(V: np.ndarray, faces: list[list[int]],
         "euler_characteristic": chi,
         "note": "graded axis, not a gate; par is a strict bound only for all-quad meshes",
     }
+
+
+
+def connectivity_check(V, faces, RV, ref_faces, boundary_tol_m):
+    """Require a single manifold canopy with the reference topology and boundary.
+
+    Coincident per-panel exports are welded on the same 1 micrometre coordinate
+    grid used by topology_score. Boundary distances are measured in plan.
+    """
+    def graph(vertices, panels):
+        corners, edges, _, pos, boundary, count = _mesh_graph(vertices, panels)
+        adjacent = defaultdict(set)
+        boundary_degree = defaultdict(int)
+        for (a, b), uses in edges.items():
+            adjacent[a].add(b)
+            adjacent[b].add(a)
+            if uses == 1:
+                boundary_degree[a] += 1
+                boundary_degree[b] += 1
+        unseen = set(corners)
+        components = 0
+        while unseen:
+            components += 1
+            pending = [unseen.pop()]
+            while pending:
+                for other in adjacent[pending.pop()] & unseen:
+                    unseen.remove(other)
+                    pending.append(other)
+        segments = np.array([[pos[a][:2], pos[b][:2]] for (a, b), n in edges.items()
+                             if n == 1]).reshape(-1, 2, 2)
+        manifold = all(n <= 2 for n in edges.values()) and all(
+            n == 2 for n in boundary_degree.values())
+        return components, len(corners) - len(edges) + count, manifold, segments
+
+    def distance(source, target):
+        if not len(source) or not len(target):
+            return float("inf")
+        points = np.concatenate([source[:, 0], source[:, 1], source.mean(axis=1)])
+        a, b = target[:, 0], target[:, 1]
+        ab = b - a
+        denominator = np.maximum((ab * ab).sum(1), 1e-30)
+        distances = []
+        for point in points:
+            t = np.clip(((point - a) * ab).sum(1) / denominator, 0, 1)
+            distances.append(np.linalg.norm(point - (a + t[:, None] * ab), axis=1).min())
+        return float(max(distances))
+
+    components, chi, manifold, boundary = graph(V, faces)
+    _, ref_chi, _, ref_boundary = graph(RV, ref_faces)
+    gap = max(distance(boundary, ref_boundary), distance(ref_boundary, boundary))
+    return {"pass": components == 1 and manifold and chi == ref_chi and gap <= boundary_tol_m,
+            "components": components, "manifold": manifold,
+            "euler_characteristic": chi, "reference_euler_characteristic": ref_chi,
+            "boundary_gap_m": gap, "boundary_tolerance_m": boundary_tol_m,
+            "weld_grid_m": 1e-6}
 
 
 def _closest_on_triangles(p: np.ndarray, a: np.ndarray, b: np.ndarray,
@@ -424,9 +501,9 @@ def off_surface_analytic(V: np.ndarray, surface_z, fold_xy_tol: float = 1e-3,
 
     Vertical distance is an upper bound on true perpendicular distance (they
     differ by 1/sqrt(1+|grad f|^2)), i.e. conservative, which is the safe
-    direction. This is only meaningful if the mesh is a height field; a folded /
-    overhanging mesh (two vertices at the same x,y, different z) makes vertical
-    distance nonsense, so we detect that and let the caller trip a verdict."""
+    direction. The fold check is only a vertex-pair heuristic: pairs within
+    fold_xy_tol in plan and over fold_z_tol apart in height are flagged. It does
+    not detect projected-face overlaps or certify a height field."""
     from scipy.spatial import cKDTree
 
     xy = V[:, :2]
@@ -508,7 +585,7 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
     bbox_min, bbox_max = V.min(0), V.max(0)
 
     # --- off-surface (analytic height field if available; exact, no noise) ---
-    off_surface = coverage = domain = None
+    off_surface = coverage = domain = domain_par = connectivity = None
     if surface_z is not None:
         off_surface = off_surface_analytic(V, surface_z)
     # --- coverage needs the reference mesh; also fallback off-surface ---
@@ -519,6 +596,9 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
             [triangulate(f, RV) for f in reference.faces if len(f) >= 3]
         )
         domain = domain_corners(RV, reference.faces)
+        domain_par = topology_score(RV, reference.faces)["par"]
+        connectivity = connectivity_check(V, mesh.faces, RV, reference.faces,
+                                           thr.off_surface_max_mm / 1000.0)
         ref_area = float(sum(0.5 * np.linalg.norm(np.cross(t[1] - t[0], t[2] - t[0]))
                              for t in ref_tris))
         if off_surface is None:  # no analytic surface -> mesh distance (noisy)
@@ -571,7 +651,8 @@ def score_mesh(mesh: Mesh, units: str = "m", reference: Mesh | None = None,
             "degenerate_panels": n_degen,
             "note": "recorded, graded axis -- not a hard gate (see score.py header)",
         },
-        "topology": topology_score(V, mesh.faces, domain),
+        "topology": topology_score(V, mesh.faces, domain, domain_par),
+        "connectivity": connectivity,
         "off_surface_mm": off_surface,
         "coverage": coverage,
         "bbox_m": {"min": bbox_min.tolist(), "max": bbox_max.tolist(),
@@ -589,13 +670,14 @@ def _trilemma_corner(r: dict) -> str:
     technique and hit the known boundary problem' from 'gave up'. Maps every run
     to the three measured reference corners."""
     p = r["planarity_mm"]
-    planar = bool(p["quads_total"] and p["quads_failing_tol"] == 0)
+    planar = (r["checks"]["not_triangulated"]["pass"] and r["checks"]["not_ngons"]["pass"]
+              and p["quads_failing_tol"] == 0)
     quality = r["quality"]["min_angle_deg_worst"] >= 20.0 and r["face_breakdown"]["quads"] > 0
     cov = r["coverage"]
     if cov is None:
         conforming = None
     else:
-        conforming = cov["area_ratio"] >= 0.85 and cov["max_gap_m"] <= 2.0
+        conforming = r["checks"]["coverage"]["pass"] and r["checks"]["connectivity"]["pass"]
     if conforming is None:
         return "UNKNOWN_NO_REFERENCE"
     got = [planar, quality, conforming]
@@ -636,9 +718,10 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
     }
     if r["coverage"] is not None:
         checks["coverage"] = {
-            "pass": (r["coverage"]["area_ratio"] >= thr.coverage_area_min
+            "pass": (thr.coverage_area_min <= r["coverage"]["area_ratio"] <= thr.coverage_area_max
                      and r["coverage"]["max_gap_m"] <= thr.coverage_gap_max_m),
             "area_ratio": r["coverage"]["area_ratio"],
+            "area_ratio_band": [thr.coverage_area_min, thr.coverage_area_max],
             "max_gap_m": r["coverage"]["max_gap_m"],
         }
     if r["off_surface_mm"] is not None:
@@ -651,6 +734,8 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
             "max_mm": r["off_surface_mm"]["max_mm"],
             "threshold_mm": thr.off_surface_max_mm,
         }
+    if r["connectivity"] is not None:
+        checks["connectivity"] = r["connectivity"]
     checks["degeneracy"] = {
         "pass": r["quality"]["degenerate_panels"] <= thr.degenerate_max_frac * max(
             r["panel_count"], 1),
@@ -663,8 +748,8 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
         "max_mm": r["planarity_mm"]["max"],
     }
 
-    # precedence: fundamental problems first. A non-height-field (folded/
-    # overhanging) mesh makes off-surface unreliable, so it headlines. Then
+    # Precedence: fundamental problems first. Detected vertex-pair folds
+    # headline; this heuristic does not certify a height field. Then
     # non-quad panels (the task was planar QUADS), coverage, module, and so on.
     order = [
         ("height_field", "NON_HEIGHTFIELD"),
@@ -673,6 +758,7 @@ def _evaluate(r: dict, thr: Thresholds, reference: Mesh | None) -> tuple[dict, s
         ("coverage", "INCOMPLETE_COVERAGE"),
         ("module", "MODULE_VIOLATION"),
         ("off_surface", "OFF_SURFACE"),
+        ("connectivity", "INVALID_CONNECTIVITY"),
         ("degeneracy", "DEGENERATE_PANELS"),
         ("planarity", "PLANARITY_FAIL"),
     ]
@@ -759,16 +845,39 @@ def load_surface_z(path: Path):
     return lambda x, y: mod.z_of(x, y, prm)
 
 
+def write_json_report(path: Path, result: dict, overwrite: bool = False) -> None:
+    """Publish a complete report atomically, never following the output symlink."""
+    if path.is_symlink():
+        raise FileExistsError("refusing a symlink report destination")
+    fd, temporary = tempfile.mkstemp(prefix=".panelization-report-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            stream.write(json.dumps(result, indent=2))
+            stream.flush()
+            os.fsync(stream.fileno())
+        if overwrite:
+            # Replaces the directory entry, never opens/follows its target.
+            os.replace(temporary, path)
+        else:
+            # Atomic no-clobber publication, including symlinks created in a race.
+            os.link(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Neutral planar-quad geometry scorer.")
     ap.add_argument("mesh", type=Path)
-    ap.add_argument("--units", default="m", help="m|mm|cm|in|ft|auto")
+    ap.add_argument("--units", required=True, help="m|mm|cm|in|ft|auto")
     ap.add_argument("--reference", type=Path, default=None)
     ap.add_argument("--ref-units", default="m")
     ap.add_argument("--tol-mm", type=float, default=5.0)
     ap.add_argument("--surface-def", type=Path, default=None,
                     help="surface_def.py for EXACT analytic off-surface distance")
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--overwrite-json", action="store_true",
+                    help="explicitly replace an existing regular JSON report")
     args = ap.parse_args(argv)
 
     thr = Thresholds(tol_mm=args.tol_mm)
@@ -777,7 +886,10 @@ def main(argv: list[str] | None = None) -> int:
     surface_z = load_surface_z(args.surface_def) if args.surface_def else None
     result = score_mesh(mesh, args.units, reference, args.ref_units, thr, surface_z)
     if args.json:
-        args.json.write_text(json.dumps(result, indent=2))
+        try:
+            write_json_report(args.json, result, overwrite=args.overwrite_json)
+        except OSError as exc:
+            ap.error(f"cannot write JSON report: {exc}; use --overwrite-json to replace a regular file")
     print(human_summary(result))
     return 0
 

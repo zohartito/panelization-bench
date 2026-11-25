@@ -2,6 +2,8 @@
 library) produce planar-quad facade panels and export DXF with NO AutoCAD?
 Builds a small doubly-curved grid, panelizes into quads, writes each as a
 3DFACE, saves, reopens, and reports planarity + entity count."""
+import argparse
+from pathlib import Path
 import math
 import ezdxf
 
@@ -41,7 +43,10 @@ for i in range(NX - 1):
         worst_mm = max(worst_mm, planarity_mm(a, b, c, d))
         n_quads += 1
 
-out = "/private/tmp/claude-501/-/bdd9d096-1ece-4d70-9e99-da49eb4f9dba/scratchpad/panels_smoke.dxf"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--output", type=Path, default=Path("panels_smoke.dxf"))
+out = parser.parse_args().output
+out.parent.mkdir(parents=True, exist_ok=True)
 doc.saveas(out)
 
 # reopen and count, proving it's a real persisted DXF
